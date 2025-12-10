@@ -1,0 +1,87 @@
+# app/crud.py
+
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from models.user import User
+from schemas.user import UserCreate
+from utils.password_validation import get_password_hash
+from sqlalchemy import func
+
+
+# -----------------------------
+# Get user by email
+# -----------------------------
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    return db.query(User).filter(User.email == email.lower()).first()
+
+
+# -----------------------------
+# Get user by ID
+# -----------------------------
+def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+    return db.query(User).filter(User.id == user_id).first()
+
+
+# -----------------------------
+# Create new user
+# -----------------------------
+def create_user(db: Session, user_in: UserCreate) -> User:
+    hashed_pw = get_password_hash(user_in.password)
+
+    db_user = User(
+        full_name=user_in.full_name,
+        email=user_in.email.lower(),
+        hashed_password=hashed_pw,
+        role=user_in.role,
+    )
+
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    return db_user
+
+
+# -----------------------------
+# Get users by specific role
+# -----------------------------
+def get_users_by_role(db: Session, role: str, skip: int = 0, limit: int = 100) -> List[User]:
+    return (
+        db.query(User)
+        .filter(User.role == role)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+# -----------------------------
+# Get all drivers easily
+# -----------------------------
+def get_all_drivers(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
+    return get_users_by_role(db, "driver", skip, limit)
+
+
+# -----------------------------
+# Count users grouped by role
+# -----------------------------
+def count_users_by_role(db: Session):
+    results = db.query(User.role, func.count(User.id)).group_by(User.role).all()
+    return {role: count for role, count in results}
+
+
+# -----------------------------
+# Update user role
+# -----------------------------
+def update_user_role(db: Session, user_id: int, new_role: str) -> User:
+    db_user = get_user_by_id(db, user_id)
+
+    if not db_user:
+        raise ValueError("User not found")
+
+    db_user.role = new_role
+
+    db.commit()
+    db.refresh(db_user)
+
+    return db_user
