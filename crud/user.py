@@ -7,24 +7,15 @@ from schemas.user import UserCreate
 from utils.password_validation import get_password_hash
 from sqlalchemy import func
 
-
-# -----------------------------
 # Get user by email
-# -----------------------------
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     return db.query(User).filter(User.email == email.lower()).first()
 
-
-# -----------------------------
 # Get user by ID
-# -----------------------------
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     return db.query(User).filter(User.id == user_id).first()
 
-
-# -----------------------------
 # Create new user
-# -----------------------------
 def create_user(db: Session, user_in: UserCreate) -> User:
     hashed_pw = get_password_hash(user_in.password)
 
@@ -41,10 +32,7 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
     return db_user
 
-
-# -----------------------------
 # Get users by specific role
-# -----------------------------
 def get_users_by_role(db: Session, role: str, skip: int = 0, limit: int = 100) -> List[User]:
     return (
         db.query(User)
@@ -54,25 +42,16 @@ def get_users_by_role(db: Session, role: str, skip: int = 0, limit: int = 100) -
         .all()
     )
 
-
-# -----------------------------
 # Get all drivers easily
-# -----------------------------
 def get_all_drivers(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
     return get_users_by_role(db, "driver", skip, limit)
 
-
-# -----------------------------
 # Count users grouped by role
-# -----------------------------
 def count_users_by_role(db: Session):
     results = db.query(User.role, func.count(User.id)).group_by(User.role).all()
     return {role: count for role, count in results}
 
-
-# -----------------------------
 # Update user role
-# -----------------------------
 def update_user_role(db: Session, user_id: int, new_role: str) -> User:
     db_user = get_user_by_id(db, user_id)
 

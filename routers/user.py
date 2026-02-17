@@ -15,13 +15,9 @@ from crud.user import (
 )
 from auth.jwt import get_current_user
 
-
 router = APIRouter(prefix="/users", tags=["Users"])
 
-
-# -------------------------------------------------
 # Role-based feature lists
-# -------------------------------------------------
 def get_role_features(role: str):
     features = {
         "admin": {
@@ -43,18 +39,12 @@ def get_role_features(role: str):
     }
     return features.get(role, features["user"])
 
-
-# -------------------------------------------------
 # Get current logged-in user
-# -------------------------------------------------
 @router.get("/me", response_model=UserOut)
 def read_current_user(current_user=Depends(get_current_user)):
     return current_user
 
-
-# -------------------------------------------------
 # Home Page for logged-in users
-# -------------------------------------------------
 @router.get("/home")
 def home_page(current_user=Depends(get_current_user)):
     return {
@@ -70,10 +60,7 @@ def home_page(current_user=Depends(get_current_user)):
         "role_specific_features": get_role_features(current_user.role),
     }
 
-
-# -------------------------------------------------
 # Admin: Get users by role
-# -------------------------------------------------
 @router.get("/by-role/{role}", response_model=List[UserOut])
 def get_users_by_role_endpoint(
     role: UserRole,
@@ -90,10 +77,7 @@ def get_users_by_role_endpoint(
 
     return get_users_by_role(db, role.value, skip, limit)
 
-
-# -------------------------------------------------
 # Get all drivers (drivers only)
-# -------------------------------------------------
 @router.get("/drivers", response_model=List[UserOut])
 def get_drivers(
     skip: int = Query(0),
