@@ -6,6 +6,7 @@ from models.user import User
 from schemas.user import UserCreate
 from utils.password_validation import get_password_hash
 from sqlalchemy import func
+import secrets
 
 # Get user by email
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
@@ -30,6 +31,21 @@ def create_user(db: Session, user_in: UserCreate) -> User:
     db.commit()
     db.refresh(db_user)
 
+    return db_user
+
+
+def create_google_user(db: Session, email: str, full_name: str, role: str = "user") -> User:
+    # Google-auth users still need a hash placeholder in this schema.
+    temp_password = secrets.token_urlsafe(32)
+    db_user = User(
+        full_name=full_name.strip(),
+        email=email.lower(),
+        hashed_password=get_password_hash(temp_password),
+        role=role,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
     return db_user
 
 # Get users by specific role
