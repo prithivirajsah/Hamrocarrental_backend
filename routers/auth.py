@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from database_connection import get_db
-from auth.google import verify_google_id_token
+
 from auth.jwt import authenticate_user, create_access_token
 from crud.user import get_user_by_email, create_user, create_google_user
 from utils.password_validation import validate_password_strength, get_password_requirements

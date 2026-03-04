@@ -8,10 +8,9 @@ load_dotenv()
 
 from database_connection import engine, Base
 from models.user import User  # noqa: F401
-from models.booking import Booking  # noqa: F401
+from models.contact import ContactMessage  # noqa: F401
 from routers.auth import router as auth_router
-from routers.booking import router as booking_router
-from routers.home import router as home_router
+from routers.contact import router as contact_router
 from routers.user import router as user_router
 
 # Create DB tables (for SQLite / development). 
@@ -51,8 +50,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(auth_router)
-app.include_router(booking_router)
-app.include_router(home_router)
+app.include_router(contact_router)
 app.include_router(user_router)
 
 @app.get("/")
