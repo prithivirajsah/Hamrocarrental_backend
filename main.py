@@ -3,14 +3,17 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
 from database_connection import engine, Base
 from models.user import User  # noqa: F401
 from models.contact import ContactMessage  # noqa: F401
+from models.post import Post  # noqa: F401
 from routers.auth import router as auth_router
 from routers.contact import router as contact_router
+from routers.post import router as post_router
 from routers.user import router as user_router
 
 # Create DB tables (for SQLite / development). 
@@ -48,9 +51,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Include Routers
 app.include_router(auth_router)
 app.include_router(contact_router)
+app.include_router(post_router)
 app.include_router(user_router)
 
 @app.get("/")
