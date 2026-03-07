@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user
-from crud.post import create_post
+from crud.post import create_post, get_post_by_id, get_posts, get_posts_by_owner
 from database_connection import get_db
-from schemas.post import PostCreate, PostCreateResponse
+from schemas.post import PostCreate, PostCreateResponse, PostOut
 
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
@@ -95,3 +95,37 @@ async def add_post(
         "message": "Post created successfully.",
         "post": post,
     }
+
+
+@router.get("", response_model=List[PostOut], status_code=status.HTTP_200_OK)
+def list_posts(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    return get_posts(db, skip=safe_skip, limit=safe_limit)
+
+
+@router.get("/me", response_model=List[PostOut], status_code=status.HTTP_200_OK)
+def list_my_posts(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    return get_posts_by_owner(db, owner_id=current_user.id, skip=safe_skip, limit=safe_limit)
+
+
+@router.get("/{post_id}", response_model=PostOut, status_code=status.HTTP_200_OK)
+def get_post(post_id: int, db: Session = Depends(get_db)):
+    post = get_post_by_id(db, post_id=post_id)
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found",
+        )
+    return post
