@@ -18,6 +18,7 @@ from routers.booking import router as booking_router
 from routers.contact import router as contact_router
 from routers.post import router as post_router
 from routers.user import router as user_router
+from routers.admin import router as admin_router
 
 
 def _migrate_legacy_bookings_schema() -> None:
@@ -26,7 +27,8 @@ def _migrate_legacy_bookings_schema() -> None:
     if "bookings" not in inspector.get_table_names():
         return
 
-    column_names = {col["name"] for col in inspector.get_columns("bookings")}
+    columns = {col["name"]: col for col in inspector.get_columns("bookings")}
+    column_names = set(columns.keys())
 
     with engine.begin() as conn:
         if "post_id" not in column_names:
@@ -97,6 +99,16 @@ def _migrate_legacy_bookings_schema() -> None:
         if "note" not in column_names:
             conn.execute(text("ALTER TABLE bookings ADD COLUMN note TEXT"))
 
+        # Legacy schemas may keep old columns as NOT NULL even though the current
+        # API no longer writes to them (e.g. vehicle_type), causing insert errors.
+        if engine.dialect.name == "postgresql":
+            for legacy_column in ("vehicle_type", "pickup_date", "return_date", "dropoff_location"):
+                legacy_meta = columns.get(legacy_column)
+                if legacy_meta and legacy_meta.get("nullable") is False:
+                    conn.execute(
+                        text(f'ALTER TABLE bookings ALTER COLUMN "{legacy_column}" DROP NOT NULL')
+                    )
+
 # Create DB tables (for SQLite / development). 
 # In production, use Alembic migrations.
 Base.metadata.create_all(bind=engine)
@@ -142,6 +154,7 @@ app.include_router(contact_router)
 app.include_router(post_router)
 app.include_router(booking_router)
 app.include_router(user_router)
+app.include_router(admin_router)
 
 @app.get("/")
 def root():

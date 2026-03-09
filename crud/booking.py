@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -62,6 +63,37 @@ def get_bookings_by_user(db: Session, user_id: int, skip: int = 0, limit: int = 
         .offset(skip)
         .limit(limit)
         .all()
+    )
+
+
+def get_bookings_by_owner(db: Session, owner_id: int, skip: int = 0, limit: int = 50) -> list[Booking]:
+    return (
+        db.query(Booking)
+        .filter(Booking.owner_id == owner_id, Booking.post_id.isnot(None))
+        .order_by(Booking.created_at.desc(), Booking.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def has_booking_overlap(
+    db: Session,
+    post_id: int,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    """Return True if any active/pending booking overlaps the requested range."""
+    return (
+        db.query(Booking)
+        .filter(
+            Booking.post_id == post_id,
+            Booking.status.in_(["pending", "confirmed"]),
+            Booking.start_date <= end_date,
+            Booking.end_date >= start_date,
+        )
+        .first()
+        is not None
     )
 
 

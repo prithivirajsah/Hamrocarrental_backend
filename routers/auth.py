@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from database_connection import get_db
 
-from auth.jwt import authenticate_user, create_access_token
+from auth.jwt import authenticate_user, create_access_token, get_current_user
 from crud.user import get_user_by_email, create_user, create_google_user
 from utils.password_validation import validate_password_strength, get_password_requirements
 from utils.email_service import send_account_created_login_email
@@ -71,4 +71,12 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
         "access_token": access_token,
         "user": UserOut.from_orm(user),
         "message": f"Welcome, {user.full_name}!"
+    }
+
+
+@router.get("/session")
+def get_auth_session(current_user=Depends(get_current_user)):
+    return {
+        "authenticated": True,
+        "user": UserOut.from_orm(current_user),
     }

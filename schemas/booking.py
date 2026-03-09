@@ -78,3 +78,10 @@ class BookingCreateResponse(BaseModel):
 
 class BookingStatusUpdate(BaseModel):
     status: BookingStatus
+
+
+class BookingAvailabilityResponse(BaseModel):
+    post_id: int
+    start_date: date
+    end_date: date
+    available: bool

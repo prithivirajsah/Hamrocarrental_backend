@@ -9,13 +9,21 @@ from crud.booking import (
     create_booking,
     get_booking_by_id,
     get_bookings,
+    get_bookings_by_owner,
     get_bookings_by_user,
+    has_booking_overlap,
     update_booking_status,
 )
 from crud.post import get_post_by_id
 from crud.user import get_user_by_id
 from database_connection import get_db
-from schemas.booking import BookingCreate, BookingCreateResponse, BookingOut, BookingStatusUpdate
+from schemas.booking import (
+    BookingAvailabilityResponse,
+    BookingCreate,
+    BookingCreateResponse,
+    BookingOut,
+    BookingStatusUpdate,
+)
 
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -78,6 +86,17 @@ def add_booking(
             detail="Invalid date range",
         )
 
+    if has_booking_overlap(
+        db,
+        post_id=post.id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Selected date range is not available for this vehicle",
+        )
+
     total_price = float(post.price_per_day) * total_days
 
     booking = create_booking(
@@ -130,6 +149,53 @@ def list_my_bookings(
     safe_limit = min(max(limit, 1), 100)
     records = get_bookings_by_user(db, user_id=current_user.id, skip=safe_skip, limit=safe_limit)
     return [_to_booking_out(db, booking) for booking in records]
+
+
+@router.get("/owner/me", response_model=List[BookingOut], status_code=status.HTTP_200_OK)
+def list_owner_bookings(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    records = get_bookings_by_owner(db, owner_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    return [_to_booking_out(db, booking) for booking in records]
+
+
+@router.get("/availability", response_model=BookingAvailabilityResponse, status_code=status.HTTP_200_OK)
+def check_booking_availability(
+    post_id: int,
+    start_date: date,
+    end_date: date,
+    db: Session = Depends(get_db),
+):
+    post = get_post_by_id(db, post_id)
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vehicle post not found",
+        )
+
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="End date must be greater than or equal to start date",
+        )
+
+    available = not has_booking_overlap(
+        db,
+        post_id=post_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return {
+        "post_id": post_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "available": available,
+    }
 
 
 @router.patch("/{booking_id}/status", response_model=BookingOut, status_code=status.HTTP_200_OK)
