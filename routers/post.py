@@ -1,9 +1,9 @@
 import json
 import os
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user, get_current_user_optional
@@ -68,27 +68,97 @@ async def _save_images(files: Optional[List[UploadFile]]) -> List[str]:
     return image_urls
 
 
+def _pick_value(data: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in data:
+            return data[key]
+    return None
+
+
+def _normalize_features_input(raw_features: Any) -> List[str]:
+    if raw_features is None:
+        return []
+
+    if isinstance(raw_features, list):
+        return [str(item).strip() for item in raw_features if str(item).strip()]
+
+    if isinstance(raw_features, str):
+        return _parse_features(raw_features)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="features must be a list, JSON array string, or comma-separated string",
+    )
+
+
+async def _build_payload_from_request(request: Request) -> PostCreate:
+    content_type = request.headers.get("content-type", "").lower()
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+
+        form_data: Dict[str, Any] = {}
+        image_files: List[UploadFile] = []
+
+        for key, value in form.multi_items():
+            if isinstance(value, UploadFile):
+                if key in {"images", "files"}:
+                    image_files.append(value)
+                continue
+            form_data[key] = value
+
+        return PostCreate(
+            post_title=str(_pick_value(form_data, "post_title", "postTitle") or ""),
+            price_per_day=float(_pick_value(form_data, "price_per_day", "pricePerDay") or 0),
+            location=str(_pick_value(form_data, "location") or ""),
+            contact_number=str(_pick_value(form_data, "contact_number", "contactNumber") or ""),
+            description=str(_pick_value(form_data, "description") or ""),
+            features=_normalize_features_input(_pick_value(form_data, "features")),
+            image_urls=await _save_images(image_files),
+        )
+
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request payload. Send JSON or multipart/form-data.",
+        )
+
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request payload must be an object.",
+        )
+
+    return PostCreate(
+        post_title=str(_pick_value(body, "post_title", "postTitle") or ""),
+        price_per_day=float(_pick_value(body, "price_per_day", "pricePerDay") or 0),
+        location=str(_pick_value(body, "location") or ""),
+        contact_number=str(_pick_value(body, "contact_number", "contactNumber") or ""),
+        description=str(_pick_value(body, "description") or ""),
+        features=_normalize_features_input(_pick_value(body, "features")),
+        image_urls=[
+            str(url).strip()
+            for url in (_pick_value(body, "image_urls", "imageUrls") or [])
+            if str(url).strip()
+        ],
+    )
+
+
 @router.post("", response_model=PostCreateResponse, status_code=status.HTTP_201_CREATED)
 async def add_post(
-    post_title: str = Form(...),
-    price_per_day: float = Form(...),
-    location: str = Form(...),
-    contact_number: str = Form(...),
-    description: str = Form(...),
-    features: Optional[str] = Form(None),
-    images: Optional[List[UploadFile]] = File(None),
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    payload = PostCreate(
-        post_title=post_title,
-        price_per_day=price_per_day,
-        location=location,
-        contact_number=contact_number,
-        description=description,
-        features=_parse_features(features),
-        image_urls=await _save_images(images),
-    )
+    try:
+        payload = await _build_payload_from_request(request)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="price_per_day must be a valid number",
+        )
 
     post = create_post(db, owner_id=current_user.id, payload=payload)
     return {
