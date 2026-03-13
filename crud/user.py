@@ -1,12 +1,14 @@
 # app/crud.py
 
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from models.user import User
-from schemas.user import UserCreate
-from utils.password_validation import get_password_hash
 from sqlalchemy import func
 import secrets
+from typing import List, Optional
+
+from sqlalchemy.orm import Session
+
+from models.user import User
+from schemas.user import UserCreate, UserProfileUpdate
+from utils.password_validation import get_password_hash
 
 # Get user by email
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
@@ -80,3 +82,16 @@ def update_user_role(db: Session, user_id: int, new_role: str) -> User:
     db.refresh(db_user)
 
     return db_user
+
+
+def update_user_profile(db: Session, user: User, payload: UserProfileUpdate) -> User:
+    user.full_name = payload.full_name
+    user.phone = payload.phone
+    user.location = payload.location
+    user.country = payload.country
+    user.date_of_birth = payload.date_of_birth
+
+    db.commit()
+    db.refresh(user)
+
+    return user

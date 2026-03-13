@@ -1,16 +1,19 @@
 # app/routers/user_router.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from database_connection import get_db
-from schemas.user import UserOut, UserRole
+from schemas.user import UserOut, UserProfileUpdate, UserRole
 from crud.user import (
+    get_all_drivers,
+    get_user_by_id,
     get_users_by_role,
     get_all_drivers,
     count_users_by_role,
-    get_user_by_id,
+    update_user_profile,
     update_user_role
 )
 from auth.jwt import get_current_user
@@ -43,6 +46,15 @@ def get_role_features(role: str):
 @router.get("/me", response_model=UserOut)
 def read_current_user(current_user=Depends(get_current_user)):
     return current_user
+
+
+@router.put("/me", response_model=UserOut)
+def update_current_user(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return update_user_profile(db, current_user, payload)
 
 # Home Page for logged-in users
 @router.get("/home")

@@ -45,3 +45,28 @@ def get_posts_by_owner(db: Session, owner_id: int, skip: int = 0, limit: int = 2
         .limit(limit)
         .all()
     )
+
+
+def update_post(db: Session, post_id: int, owner_id: int, payload: PostCreate) -> Optional[Post]:
+    db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
+    if not db_post:
+        return None
+    db_post.post_title = payload.post_title
+    db_post.price_per_day = payload.price_per_day
+    db_post.location = payload.location
+    db_post.contact_number = payload.contact_number
+    db_post.description = payload.description
+    db_post.features = payload.features
+    db_post.image_urls = payload.image_urls
+    db.commit()
+    db.refresh(db_post)
+    return db_post
+
+
+def delete_post(db: Session, post_id: int, owner_id: int) -> bool:
+    db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
+    if not db_post:
+        return False
+    db.delete(db_post)
+    db.commit()
+    return True

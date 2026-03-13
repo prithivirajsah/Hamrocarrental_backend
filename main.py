@@ -111,10 +111,33 @@ def _migrate_legacy_bookings_schema() -> None:
                         text(f'ALTER TABLE bookings ALTER COLUMN "{legacy_column}" DROP NOT NULL')
                     )
 
+
+def _migrate_legacy_users_schema() -> None:
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"]: col for col in inspector.get_columns("users")}
+    column_names = set(columns.keys())
+
+    with engine.begin() as conn:
+        if "phone" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
+
+        if "location" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN location VARCHAR"))
+
+        if "country" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN country VARCHAR"))
+
+        if "date_of_birth" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN date_of_birth DATE"))
+
 # Create DB tables (for SQLite / development). 
 # In production, use Alembic migrations.
 Base.metadata.create_all(bind=engine)
 _migrate_legacy_bookings_schema()
+_migrate_legacy_users_schema()
 
 app = FastAPI(
     title="HamroRental API",

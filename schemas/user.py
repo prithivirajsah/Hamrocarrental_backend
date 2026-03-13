@@ -1,8 +1,9 @@
 # app/schemas.py
-from pydantic import BaseModel, EmailStr, validator, field_validator, model_validator
-from typing import Optional
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, EmailStr, field_validator, model_validator, validator
 
 class UserRole(str, Enum):
     driver = "driver"
@@ -49,12 +50,40 @@ class UserCreate(UserBase):
 
 class UserOut(UserBase):
     id: int
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    country: Optional[str] = None
+    date_of_birth: Optional[date] = None
     is_active: bool
     created_at: datetime
 
     model_config = {
         "from_attributes": True
     }
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: str
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    country: Optional[str] = None
+    date_of_birth: Optional[date] = None
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Full name must be at least 2 characters long")
+        return cleaned
+
+    @field_validator("phone", "location", "country")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 class Token(BaseModel):
     access_token: str
