@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator
 
 class PostCreate(BaseModel):
     post_title: str
+    category: str = "sedan"
     price_per_day: float
     location: str
     contact_number: str
@@ -34,11 +35,20 @@ class PostCreate(BaseModel):
         cleaned = [item.strip() for item in value if item and item.strip()]
         return cleaned
 
+    @field_validator("category")
+    @classmethod
+    def normalize_category(cls, value: str) -> str:
+        cleaned = (value or "").strip().lower()
+        if not cleaned:
+            return "sedan"
+        return cleaned
+
 
 class PostOut(BaseModel):
     id: int
     owner_id: int
     post_title: str
+    category: str
     price_per_day: float
     location: str
     contact_number: str

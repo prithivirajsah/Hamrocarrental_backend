@@ -10,6 +10,7 @@ class Post(Base):
     id = Column(Integer, primary_key=True, index=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     post_title = Column(String, nullable=False)
+    category = Column(String, nullable=False, default="sedan", index=True)
     price_per_day = Column(Float, nullable=False)
     location = Column(String, nullable=False)
     contact_number = Column(String, nullable=False)

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from auth.jwt import get_current_user, get_current_user_optional
 from crud.post import create_post, get_post_by_id, get_posts, get_posts_by_owner, update_post, delete_post
@@ -17,6 +18,18 @@ router = APIRouter(prefix="/posts", tags=["Posts"])
 UPLOAD_DIR = "static/uploads/posts"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+POST_CATEGORIES = [
+    {"id": "all", "label": "All vehicles", "icon": "🚗"},
+    {"id": "sedan", "label": "Sedan", "icon": "🚙"},
+    {"id": "cabriolet", "label": "Cabriolet", "icon": "🏎️"},
+    {"id": "pickup", "label": "Pickup", "icon": "🛻"},
+    {"id": "suv", "label": "SUV", "icon": "🚐"},
+    {"id": "minivan", "label": "Minivan", "icon": "🚌"},
+]
+
+
+def _is_uploaded_file(value: Any) -> bool:
+    return isinstance(value, (UploadFile, StarletteUploadFile))
 
 
 def _parse_features(features_raw: Optional[str]) -> List[str]:
@@ -101,7 +114,7 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
         image_files: List[UploadFile] = []
 
         for key, value in form.multi_items():
-            if isinstance(value, UploadFile):
+            if _is_uploaded_file(value):
                 if key in {"images", "files"}:
                     image_files.append(value)
                 continue
@@ -109,6 +122,7 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
 
         return PostCreate(
             post_title=str(_pick_value(form_data, "post_title", "postTitle") or ""),
+            category=str(_pick_value(form_data, "category") or "sedan"),
             price_per_day=float(_pick_value(form_data, "price_per_day", "pricePerDay") or 0),
             location=str(_pick_value(form_data, "location") or ""),
             contact_number=str(_pick_value(form_data, "contact_number", "contactNumber") or ""),
@@ -133,6 +147,7 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
 
     return PostCreate(
         post_title=str(_pick_value(body, "post_title", "postTitle") or ""),
+        category=str(_pick_value(body, "category") or "sedan"),
         price_per_day=float(_pick_value(body, "price_per_day", "pricePerDay") or 0),
         location=str(_pick_value(body, "location") or ""),
         contact_number=str(_pick_value(body, "contact_number", "contactNumber") or ""),
@@ -171,17 +186,24 @@ async def add_post(
 def list_posts(
     skip: int = 0,
     limit: int = 20,
+    category: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
-    return get_posts(db, skip=safe_skip, limit=safe_limit)
+    return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
+
+
+@router.get("/categories", status_code=status.HTTP_200_OK)
+def list_post_categories():
+    return POST_CATEGORIES
 
 
 @router.get("/me", response_model=List[PostOut], status_code=status.HTTP_200_OK)
 def list_my_posts(
     skip: int = 0,
     limit: int = 20,
+    category: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user_optional),
 ):
@@ -190,9 +212,15 @@ def list_my_posts(
 
     # Backward compatibility for clients that call /posts/me before login.
     if current_user is None:
-        return get_posts(db, skip=safe_skip, limit=safe_limit)
+        return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
 
-    return get_posts_by_owner(db, owner_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    return get_posts_by_owner(
+        db,
+        owner_id=current_user.id,
+        skip=safe_skip,
+        limit=safe_limit,
+        category=category,
+    )
 
 
 @router.get("/{post_id}", response_model=PostOut, status_code=status.HTTP_200_OK)
@@ -217,7 +245,7 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
         image_files: List[UploadFile] = []
 
         for key, value in form.multi_items():
-            if isinstance(value, UploadFile):
+            if _is_uploaded_file(value):
                 if key in {"images", "files"}:
                     image_files.append(value)
                 continue
@@ -238,6 +266,7 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
 
         payload = PostCreate(
             post_title=str(_pick_value(form_data, "post_title", "postTitle") or ""),
+            category=str(_pick_value(form_data, "category") or "sedan"),
             price_per_day=float(_pick_value(form_data, "price_per_day", "pricePerDay") or 0),
             location=str(_pick_value(form_data, "location") or ""),
             contact_number=str(_pick_value(form_data, "contact_number", "contactNumber") or ""),
@@ -275,6 +304,7 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
 
     payload = PostCreate(
         post_title=str(_pick_value(body, "post_title", "postTitle") or ""),
+        category=str(_pick_value(body, "category") or "sedan"),
         price_per_day=float(_pick_value(body, "price_per_day", "pricePerDay") or 0),
         location=str(_pick_value(body, "location") or ""),
         contact_number=str(_pick_value(body, "contact_number", "contactNumber") or ""),

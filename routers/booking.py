@@ -164,6 +164,31 @@ def list_owner_bookings(
     return [_to_booking_out(db, booking) for booking in records]
 
 
+@router.get("/{booking_id}", response_model=BookingOut, status_code=status.HTTP_200_OK)
+def get_booking_details(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    booking = get_booking_by_id(db, booking_id=booking_id)
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    is_owner = booking.owner_id == current_user.id
+    is_renter = booking.user_id == current_user.id
+    is_admin = current_user.role == "admin"
+    if not (is_owner or is_renter or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this booking",
+        )
+
+    return _to_booking_out(db, booking)
+
+
 @router.get("/availability", response_model=BookingAvailabilityResponse, status_code=status.HTTP_200_OK)
 def check_booking_availability(
     post_id: int,
