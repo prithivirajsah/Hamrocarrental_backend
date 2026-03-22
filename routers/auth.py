@@ -1,5 +1,5 @@
 # app/routers/auth_router.py
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -23,12 +23,28 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     return user
 
 @router.post("/login", response_model=LoginResponse)
-def login(
+async def login(
+    request: Request,
     background_tasks: BackgroundTasks,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    user = authenticate_user(db, form_data.username, form_data.password)
+    email = form_data.username
+    password = form_data.password
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+        email = (payload.get("email") or payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+
+    if not email or not password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email/username and password are required",
+        )
+
+    user = authenticate_user(db, email, password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Incorrect email or password",

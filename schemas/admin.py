@@ -43,6 +43,23 @@ class DashboardPostItem(BaseModel):
     created_at: datetime
 
 
+class AdminPostListItem(BaseModel):
+    id: int
+    owner_id: int
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+    owner_role: Optional[str] = None
+    post_title: str
+    category: str
+    price_per_day: float
+    location: str
+    contact_number: str
+    description: str
+    features: List[str]
+    image_urls: List[str]
+    created_at: datetime
+
+
 class DashboardContactItem(BaseModel):
     id: int
     full_name: str

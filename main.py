@@ -206,3 +206,18 @@ app.include_router(review_router)
 @app.get("/")
 def root():
     return {"message": "HamroRental API is running!"}
+
+
+@app.get("/home")
+def home():
+    return {
+        "hero_title": "Drive Your Dream Car Today",
+        "hero_subtitle": "Choose from trusted rentals across Nepal.",
+        "cta_text": "Book Now",
+        "features": [
+            {"title": "Wide Vehicle Selection", "description": "Find sedans, SUVs, pickups, and more."},
+            {"title": "Secure Booking", "description": "Simple and reliable reservations."},
+            {"title": "24/7 Support", "description": "We are here whenever you need help."},
+        ],
+        "featured_vehicles": [],
+    }

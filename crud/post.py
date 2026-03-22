@@ -65,8 +65,17 @@ def get_posts_by_owner(
     )
 
 
-def update_post(db: Session, post_id: int, owner_id: int, payload: PostCreate) -> Optional[Post]:
-    db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
+def update_post(
+    db: Session,
+    post_id: int,
+    owner_id: int,
+    payload: PostCreate,
+    is_admin: bool = False,
+) -> Optional[Post]:
+    if is_admin:
+        db_post = db.query(Post).filter(Post.id == post_id).first()
+    else:
+        db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
     if not db_post:
         return None
     db_post.post_title = payload.post_title
@@ -82,8 +91,11 @@ def update_post(db: Session, post_id: int, owner_id: int, payload: PostCreate) -
     return db_post
 
 
-def delete_post(db: Session, post_id: int, owner_id: int) -> bool:
-    db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
+def delete_post(db: Session, post_id: int, owner_id: int, is_admin: bool = False) -> bool:
+    if is_admin:
+        db_post = db.query(Post).filter(Post.id == post_id).first()
+    else:
+        db_post = db.query(Post).filter(Post.id == post_id, Post.owner_id == owner_id).first()
     if not db_post:
         return False
 

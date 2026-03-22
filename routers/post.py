@@ -330,7 +330,13 @@ async def update_post_endpoint(
             detail="price_per_day must be a valid number",
         )
 
-    post = update_post(db, post_id=post_id, owner_id=current_user.id, payload=payload)
+    post = update_post(
+        db,
+        post_id=post_id,
+        owner_id=current_user.id,
+        payload=payload,
+        is_admin=(getattr(current_user, "role", None) == "admin"),
+    )
     if not post:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -348,7 +354,12 @@ def delete_post_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    success = delete_post(db, post_id=post_id, owner_id=current_user.id)
+    success = delete_post(
+        db,
+        post_id=post_id,
+        owner_id=current_user.id,
+        is_admin=(getattr(current_user, "role", None) == "admin"),
+    )
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,10 +1,67 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from models.booking import Booking
 from models.contact import ContactMessage
 from models.post import Post
 from models.user import User
+
+
+def get_admin_posts(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+    search: Optional[str] = None,
+    owner_role: Optional[str] = None,
+):
+    query = (
+        db.query(Post, User)
+        .outerjoin(User, Post.owner_id == User.id)
+    )
+
+    normalized_role = (owner_role or "").strip().lower()
+    if normalized_role in {"admin", "user", "driver"}:
+        query = query.filter(User.role == normalized_role)
+
+    normalized_search = (search or "").strip().lower()
+    if normalized_search:
+        like = f"%{normalized_search}%"
+        query = query.filter(
+            Post.post_title.ilike(like)
+            | Post.category.ilike(like)
+            | Post.location.ilike(like)
+            | User.full_name.ilike(like)
+            | User.email.ilike(like)
+        )
+
+    rows = (
+        query
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id": post.id,
+            "owner_id": post.owner_id,
+            "owner_name": getattr(owner, "full_name", None),
+            "owner_email": getattr(owner, "email", None),
+            "owner_role": getattr(owner, "role", None),
+            "post_title": post.post_title,
+            "category": post.category,
+            "price_per_day": float(post.price_per_day),
+            "location": post.location,
+            "contact_number": post.contact_number,
+            "description": post.description,
+            "features": post.features or [],
+            "image_urls": post.image_urls or [],
+            "created_at": post.created_at,
+        }
+        for post, owner in rows
+    ]
 
 
 def get_admin_dashboard_data(db: Session, recent_limit: int = 8):

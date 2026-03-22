@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from database_connection import get_db
 from crud.user import get_user_by_email
-from utils.password_validation import verify_password
+from utils.password_validation import verify_password, get_password_hash
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-please!!!")
 ALGORITHM = "HS256"
@@ -30,19 +30,26 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 def authenticate_user(db: Session, email: str, password: str):
-    user = get_user_by_email(db, email.lower())
+    normalized_email = (email or "").strip().lower()
+    user = get_user_by_email(db, normalized_email)
     if not user:
         return None
 
-    if user.role == 'admin':
-        if user.hashed_password == password:
-            return user
-    # Always verify hashed password; no plaintext special case
-    else: 
-        if not verify_password(password, user.hashed_password):
+    stored_password = user.hashed_password or ""
+
+    # Legacy compatibility: some older records stored plaintext passwords.
+    # Allow one-time login with plaintext and transparently upgrade to bcrypt.
+    if stored_password.startswith("$2"):
+        if not verify_password(password, stored_password):
             return None
-        
-        return user
+    else:
+        if password != stored_password:
+            return None
+        user.hashed_password = get_password_hash(password)
+        db.commit()
+        db.refresh(user)
+
+    return user
 
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user
+from crud.booking import has_user_booking_for_post
 from crud.post import get_post_by_id
 from crud.review import (
     create_review,
@@ -54,6 +55,12 @@ def add_review(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vehicle post not found",
+        )
+
+    if not has_user_booking_for_post(db, user_id=current_user.id, post_id=payload.post_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can review this vehicle only after booking it",
         )
 
     if has_user_review_for_post(db, user_id=current_user.id, post_id=payload.post_id):

@@ -1,16 +1,19 @@
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user
 from crud.booking import (
     create_booking,
+    get_existing_user_booking_for_range,
+    get_existing_user_overlapping_booking_for_post_range,
     get_booking_by_id,
     get_bookings,
     get_bookings_by_owner,
     get_bookings_by_user,
+    has_booking_overlap_with_other_users,
     has_booking_overlap,
     update_booking_status,
 )
@@ -86,11 +89,38 @@ def add_booking(
             detail="Invalid date range",
         )
 
-    if has_booking_overlap(
+    existing_same_booking = get_existing_user_booking_for_range(
+        db,
+        user_id=current_user.id,
+        post_id=post.id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    if existing_same_booking:
+        return {
+            "message": "You already booked this vehicle for the selected dates.",
+            "booking": _to_booking_out(db, existing_same_booking),
+        }
+
+    existing_overlapping_booking_by_same_user = get_existing_user_overlapping_booking_for_post_range(
+        db,
+        user_id=current_user.id,
+        post_id=post.id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    if existing_overlapping_booking_by_same_user:
+        return {
+            "message": "You already have a booking on overlapping dates for this vehicle.",
+            "booking": _to_booking_out(db, existing_overlapping_booking_by_same_user),
+        }
+
+    if has_booking_overlap_with_other_users(
         db,
         post_id=post.id,
         start_date=payload.start_date,
         end_date=payload.end_date,
+        user_id=current_user.id,
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -164,36 +194,11 @@ def list_owner_bookings(
     return [_to_booking_out(db, booking) for booking in records]
 
 
-@router.get("/{booking_id}", response_model=BookingOut, status_code=status.HTTP_200_OK)
-def get_booking_details(
-    booking_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    booking = get_booking_by_id(db, booking_id=booking_id)
-    if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found",
-        )
-
-    is_owner = booking.owner_id == current_user.id
-    is_renter = booking.user_id == current_user.id
-    is_admin = current_user.role == "admin"
-    if not (is_owner or is_renter or is_admin):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to access this booking",
-        )
-
-    return _to_booking_out(db, booking)
-
-
 @router.get("/availability", response_model=BookingAvailabilityResponse, status_code=status.HTTP_200_OK)
 def check_booking_availability(
-    post_id: int,
-    start_date: date,
-    end_date: date,
+    post_id: int = Query(...),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
     db: Session = Depends(get_db),
 ):
     post = get_post_by_id(db, post_id)
@@ -221,6 +226,31 @@ def check_booking_availability(
         "end_date": end_date,
         "available": available,
     }
+
+
+@router.get("/{booking_id}", response_model=BookingOut, status_code=status.HTTP_200_OK)
+def get_booking_details(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    booking = get_booking_by_id(db, booking_id=booking_id)
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    is_owner = booking.owner_id == current_user.id
+    is_renter = booking.user_id == current_user.id
+    is_admin = current_user.role == "admin"
+    if not (is_owner or is_renter or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this booking",
+        )
+
+    return _to_booking_out(db, booking)
 
 
 @router.patch("/{booking_id}/status", response_model=BookingOut, status_code=status.HTTP_200_OK)

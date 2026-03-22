@@ -77,6 +77,82 @@ def get_bookings_by_owner(db: Session, owner_id: int, skip: int = 0, limit: int 
     )
 
 
+def has_user_booking_for_post(db: Session, user_id: int, post_id: int) -> bool:
+    return (
+        db.query(Booking)
+        .filter(
+            Booking.user_id == user_id,
+            Booking.post_id == post_id,
+            Booking.status.in_(["pending", "confirmed", "completed"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def get_existing_user_booking_for_range(
+    db: Session,
+    user_id: int,
+    post_id: int,
+    start_date: date,
+    end_date: date,
+) -> Optional[Booking]:
+    return (
+        db.query(Booking)
+        .filter(
+            Booking.user_id == user_id,
+            Booking.post_id == post_id,
+            Booking.start_date == start_date,
+            Booking.end_date == end_date,
+            Booking.status.in_(["pending", "confirmed", "completed"]),
+        )
+        .order_by(Booking.created_at.desc(), Booking.id.desc())
+        .first()
+    )
+
+
+def get_existing_user_overlapping_booking_for_post_range(
+    db: Session,
+    user_id: int,
+    post_id: int,
+    start_date: date,
+    end_date: date,
+) -> Optional[Booking]:
+    return (
+        db.query(Booking)
+        .filter(
+            Booking.user_id == user_id,
+            Booking.post_id == post_id,
+            Booking.status.in_(["pending", "confirmed", "completed"]),
+            Booking.start_date <= end_date,
+            Booking.end_date >= start_date,
+        )
+        .order_by(Booking.created_at.desc(), Booking.id.desc())
+        .first()
+    )
+
+
+def has_booking_overlap_with_other_users(
+    db: Session,
+    post_id: int,
+    start_date: date,
+    end_date: date,
+    user_id: int,
+) -> bool:
+    return (
+        db.query(Booking)
+        .filter(
+            Booking.post_id == post_id,
+            Booking.user_id != user_id,
+            Booking.status.in_(["pending", "confirmed"]),
+            Booking.start_date <= end_date,
+            Booking.end_date >= start_date,
+        )
+        .first()
+        is not None
+    )
+
+
 def has_booking_overlap(
     db: Session,
     post_id: int,
