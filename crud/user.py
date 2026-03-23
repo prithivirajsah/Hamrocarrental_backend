@@ -1,7 +1,6 @@
 # app/crud.py
 
 from sqlalchemy import func
-import secrets
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -12,7 +11,8 @@ from utils.password_validation import get_password_hash
 
 # Get user by email
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
-    return db.query(User).filter(User.email == email.lower()).first()
+    normalized_email = (email or "").strip().lower()
+    return db.query(User).filter(func.lower(User.email) == normalized_email).first()
 
 # Get user by ID
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
@@ -34,22 +34,6 @@ def create_user(db: Session, user_in: UserCreate) -> User:
     db.refresh(db_user)
 
     return db_user
-
-
-def create_google_user(db: Session, email: str, full_name: str, role: str = "user") -> User:
-    # Google-auth users still need a hash placeholder in this schema.
-    temp_password = secrets.token_urlsafe(32)
-    db_user = User(
-        full_name=full_name.strip(),
-        email=email.lower(),
-        hashed_password=get_password_hash(temp_password),
-        role=role,
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
 # Get users by specific role
 def get_users_by_role(db: Session, role: str, skip: int = 0, limit: int = 100) -> List[User]:
     return (

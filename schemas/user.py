@@ -92,7 +92,3 @@ class Token(BaseModel):
 class LoginResponse(Token):
     user: UserOut
     message: str
-
-
-class GoogleAuthRequest(BaseModel):
-    id_token: str
