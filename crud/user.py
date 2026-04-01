@@ -79,3 +79,10 @@ def update_user_profile(db: Session, user: User, payload: UserProfileUpdate) -> 
     db.refresh(user)
 
     return user
+
+
+def update_user_profile_image(db: Session, user: User, image_url: Optional[str]) -> User:
+    user.profile_image_url = image_url
+    db.commit()
+    db.refresh(user)
+    return user

@@ -51,6 +51,7 @@ class UserCreate(UserBase):
 class UserOut(UserBase):
     id: int
     phone: Optional[str] = None
+    profile_image_url: Optional[str] = None
     location: Optional[str] = None
     country: Optional[str] = None
     date_of_birth: Optional[date] = None

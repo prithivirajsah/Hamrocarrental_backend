@@ -13,6 +13,7 @@ class User(Base):
     role = Column(Enum("driver", "user", "admin", name="user_roles"), nullable=False, default="user")
     hashed_password = Column(String, nullable=False)
     phone = Column(String, nullable=True)
+    profile_image_url = Column(String, nullable=True)
     location = Column(String, nullable=True)
     country = Column(String, nullable=True)
     date_of_birth = Column(Date, nullable=True)

@@ -1,11 +1,39 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime
 
 from models.booking import Booking
 from models.contact import ContactMessage
 from models.post import Post
 from models.user import User
+from models.driver_license import DriverLicense
+
+
+def get_admin_users(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+):
+    query = db.query(User)
+
+    normalized_search = (search or "").strip().lower()
+    if normalized_search:
+        like = f"%{normalized_search}%"
+        query = query.filter(
+            User.full_name.ilike(like)
+            | User.email.ilike(like)
+            | User.role.ilike(like)
+        )
+
+    return (
+        query
+        .order_by(User.created_at.desc(), User.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_admin_posts(
@@ -62,6 +90,35 @@ def get_admin_posts(
         }
         for post, owner in rows
     ]
+
+
+def get_admin_messages(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+):
+    """Get all contact messages with optional search"""
+    query = db.query(ContactMessage)
+
+    normalized_search = (search or "").strip().lower()
+    if normalized_search:
+        like = f"%{normalized_search}%"
+        query = query.filter(
+            ContactMessage.full_name.ilike(like)
+            | ContactMessage.email.ilike(like)
+            | ContactMessage.subject.ilike(like)
+            | ContactMessage.topic.ilike(like)
+            | ContactMessage.message.ilike(like)
+        )
+
+    return (
+        query
+        .order_by(ContactMessage.created_at.desc(), ContactMessage.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_admin_dashboard_data(db: Session, recent_limit: int = 8):
@@ -170,4 +227,133 @@ def get_admin_dashboard_data(db: Session, recent_limit: int = 8):
             }
             for contact in recent_contacts
         ],
+    }
+
+
+def get_pending_driver_licenses(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+):
+    """Get all pending driver license verifications"""
+    licenses = (
+        db.query(DriverLicense, User)
+        .outerjoin(User, DriverLicense.user_id == User.id)
+        .filter(DriverLicense.verification_status == "pending")
+        .order_by(DriverLicense.created_at.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    
+    return [
+        {
+            "id": license.id,
+            "user_id": license.user_id,
+            "user_name": getattr(user, "full_name", None),
+            "user_email": getattr(user, "email", None),
+            "user_phone": getattr(user, "phone", None),
+            "license_number": license.license_number,
+            "license_image_url": license.license_image_url,
+            "license_expiry_date": license.license_expiry_date,
+            "verification_status": license.verification_status,
+            "created_at": license.created_at,
+        }
+        for license, user in licenses
+    ]
+
+
+def get_all_driver_licenses(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+    status: Optional[str] = None,
+):
+    """Get all driver licenses with optional status filter"""
+    query = db.query(DriverLicense, User).outerjoin(User, DriverLicense.user_id == User.id)
+    
+    if status and status in ["pending", "verified", "rejected"]:
+        query = query.filter(DriverLicense.verification_status == status)
+    
+    licenses = (
+        query
+        .order_by(DriverLicense.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    
+    return [
+        {
+            "id": license.id,
+            "user_id": license.user_id,
+            "user_name": getattr(user, "full_name", None),
+            "user_email": getattr(user, "email", None),
+            "user_phone": getattr(user, "phone", None),
+            "license_number": license.license_number,
+            "license_image_url": license.license_image_url,
+            "license_expiry_date": license.license_expiry_date,
+            "verification_status": license.verification_status,
+            "rejection_reason": license.rejection_reason,
+            "verified_at": license.verified_at,
+            "created_at": license.created_at,
+        }
+        for license, user in licenses
+    ]
+
+
+def verify_driver_license(
+    db: Session,
+    license_id: int,
+    admin_id: int,
+):
+    """Mark a driver license as verified"""
+    license = db.query(DriverLicense).filter(DriverLicense.id == license_id).first()
+    if not license:
+        return None
+    
+    license.verification_status = "verified"
+    license.verified_at = datetime.utcnow()
+    license.verified_by_admin_id = admin_id
+    db.commit()
+    db.refresh(license)
+    
+    # Also update the user's is_active status if needed
+    user = db.query(User).filter(User.id == license.user_id).first()
+    if user and not user.is_active:
+        user.is_active = True
+        db.commit()
+    
+    return {
+        "id": license.id,
+        "user_id": license.user_id,
+        "verification_status": license.verification_status,
+        "verified_at": license.verified_at,
+    }
+
+
+def reject_driver_license(
+    db: Session,
+    license_id: int,
+    admin_id: int,
+    rejection_reason: str,
+):
+    """Mark a driver license as rejected"""
+    license = db.query(DriverLicense).filter(DriverLicense.id == license_id).first()
+    if not license:
+        return None
+    
+    license.verification_status = "rejected"
+    license.rejection_reason = rejection_reason
+    license.verified_at = datetime.utcnow()
+    license.verified_by_admin_id = admin_id
+    db.commit()
+    db.refresh(license)
+    
+    return {
+        "id": license.id,
+        "user_id": license.user_id,
+        "verification_status": license.verification_status,
+        "rejection_reason": license.rejection_reason,
+        "verified_at": license.verified_at,
     }

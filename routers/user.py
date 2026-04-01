@@ -1,8 +1,10 @@
 # app/routers/user_router.py
 
-from typing import List
+import os
+import uuid
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from database_connection import get_db
@@ -14,11 +16,91 @@ from crud.user import (
     get_all_drivers,
     count_users_by_role,
     update_user_profile,
+    update_user_profile_image,
     update_user_role
 )
 from auth.jwt import get_current_user
+from crud.driver_license import create_driver_license, get_driver_license_by_user_id
+from crud.kyc import create_kyc_document, get_latest_user_kyc_document
+from pydantic import BaseModel
+
+
+# Schema for driver license upload
+class DriverLicenseUpload(BaseModel):
+    license_number: str
+    license_image_url: str
+    license_expiry_date: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "license_number": "ABC123456",
+                "license_image_url": "https://storage.example.com/license.jpg",
+                "license_expiry_date": "2025-12-31"
+            }
+        }
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+KYC_UPLOAD_DIR = "static/uploads/kyc"
+os.makedirs(KYC_UPLOAD_DIR, exist_ok=True)
+PROFILE_UPLOAD_DIR = "static/uploads/profiles"
+os.makedirs(PROFILE_UPLOAD_DIR, exist_ok=True)
+ALLOWED_KYC_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+ALLOWED_PROFILE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+}
+
+
+async def _save_kyc_file(file: UploadFile) -> Dict[str, Any]:
+    if file.content_type not in ALLOWED_KYC_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported document type: {file.content_type}",
+        )
+
+    extension = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    file_name = f"{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(KYC_UPLOAD_DIR, file_name)
+
+    data = await file.read()
+    with open(file_path, "wb") as output:
+        output.write(data)
+
+    return {
+        "url": f"/static/uploads/kyc/{file_name}",
+        "data": data,
+        "content_type": file.content_type,
+        "filename": file.filename or file_name,
+    }
+
+
+async def _save_profile_photo(file: UploadFile) -> str:
+    if file.content_type not in ALLOWED_PROFILE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported profile image type: {file.content_type}",
+        )
+
+    extension = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    file_name = f"{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(PROFILE_UPLOAD_DIR, file_name)
+
+    data = await file.read()
+    with open(file_path, "wb") as output:
+        output.write(data)
+
+    return f"/static/uploads/profiles/{file_name}"
 
 # Role-based feature lists
 def get_role_features(role: str):
@@ -55,6 +137,16 @@ def update_current_user(
     current_user=Depends(get_current_user),
 ):
     return update_user_profile(db, current_user, payload)
+
+
+@router.post("/me/profile-photo", response_model=UserOut)
+async def update_current_user_profile_photo(
+    profile_photo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    image_url = await _save_profile_photo(profile_photo)
+    return update_user_profile_image(db, current_user, image_url)
 
 # Home Page for logged-in users
 @router.get("/home")
@@ -148,3 +240,132 @@ def update_user_role_endpoint(
 
     updated_user = update_user_role(db, user_id, new_role.value)
     return updated_user
+
+
+# -------------------------------------------------
+# Driver: Upload License for verification
+# -------------------------------------------------
+@router.post("/driver/license", status_code=status.HTTP_201_CREATED)
+def upload_driver_license(
+    license_data: DriverLicenseUpload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Upload driver license for verification (driver role only)"""
+    if current_user.role != "driver":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only drivers can upload license",
+        )
+    
+    license = create_driver_license(
+        db,
+        user_id=current_user.id,
+        license_number=license_data.license_number,
+        license_image_url=license_data.license_image_url,
+        license_expiry_date=license_data.license_expiry_date,
+    )
+    
+    return {
+        "id": license.id,
+        "user_id": license.user_id,
+        "license_number": license.license_number,
+        "license_image_url": license.license_image_url,
+        "license_expiry_date": license.license_expiry_date,
+        "verification_status": license.verification_status,
+        "created_at": license.created_at,
+    }
+
+
+@router.get("/driver/license")
+def get_my_driver_license(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get current driver's license verification status"""
+    if current_user.role != "driver":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only drivers can view their license",
+        )
+    
+    license = get_driver_license_by_user_id(db, current_user.id)
+    if not license:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No license found. Please upload your license for verification.",
+        )
+    
+    return {
+        "id": license.id,
+        "user_id": license.user_id,
+        "license_number": license.license_number,
+        "license_image_url": license.license_image_url,
+        "license_expiry_date": license.license_expiry_date,
+        "verification_status": license.verification_status,
+        "rejection_reason": license.rejection_reason,
+        "verified_at": license.verified_at,
+        "created_at": license.created_at,
+    }
+
+
+@router.post("/kyc-documents", status_code=status.HTTP_201_CREATED)
+async def upload_kyc_documents(
+    document_type: str = Form(...),
+    document_number: str = Form(...),
+    front_file: UploadFile = File(...),
+    back_file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    front_saved = await _save_kyc_file(front_file)
+    back_saved = await _save_kyc_file(back_file) if back_file else None
+
+    document = create_kyc_document(
+        db,
+        user_id=current_user.id,
+        document_type=document_type,
+        document_number=document_number,
+        front_image_url=front_saved["url"],
+        back_image_url=back_saved["url"] if back_saved else None,
+        front_image_data=front_saved["data"],
+        front_image_content_type=front_saved["content_type"],
+        front_image_filename=front_saved["filename"],
+        back_image_data=back_saved["data"] if back_saved else None,
+        back_image_content_type=back_saved["content_type"] if back_saved else None,
+        back_image_filename=back_saved["filename"] if back_saved else None,
+    )
+
+    return {
+        "id": document.id,
+        "user_id": document.user_id,
+        "document_type": document.document_type,
+        "document_number": document.document_number,
+        "front_image_url": document.front_image_url,
+        "back_image_url": document.back_image_url,
+        "verification_status": document.verification_status,
+        "created_at": document.created_at,
+    }
+
+
+@router.get("/kyc-documents/me")
+def get_my_kyc_document(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    document = get_latest_user_kyc_document(db, current_user.id)
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No KYC document found")
+
+    return {
+        "id": document.id,
+        "user_id": document.user_id,
+        "document_type": document.document_type,
+        "document_number": document.document_number,
+        "front_image_url": document.front_image_url,
+        "back_image_url": document.back_image_url,
+        "verification_status": document.verification_status,
+        "rejection_reason": document.rejection_reason,
+        "reviewed_at": document.reviewed_at,
+        "created_at": document.created_at,
+    }

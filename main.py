@@ -2,7 +2,9 @@
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
@@ -14,6 +16,8 @@ from models.contact import ContactMessage  # noqa: F401
 from models.post import Post  # noqa: F401
 from models.booking import Booking  # noqa: F401
 from models.review import Review  # noqa: F401
+from models.driver_license import DriverLicense  # noqa: F401
+from models.kyc_document import KycDocument  # noqa: F401
 from routers.auth import router as auth_router
 from routers.booking import router as booking_router
 from routers.contact import router as contact_router
@@ -124,6 +128,9 @@ def _migrate_legacy_users_schema() -> None:
         if "phone" not in column_names:
             conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
 
+        if "profile_image_url" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN profile_image_url VARCHAR"))
+
         if "location" not in column_names:
             conn.execute(text("ALTER TABLE users ADD COLUMN location VARCHAR"))
 
@@ -153,18 +160,85 @@ def _migrate_legacy_posts_schema() -> None:
             if category_meta and category_meta.get("nullable") is True:
                 conn.execute(text('ALTER TABLE posts ALTER COLUMN "category" SET NOT NULL'))
 
+
+def _migrate_legacy_kyc_schema() -> None:
+    inspector = inspect(engine)
+    if "kyc_documents" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"]: col for col in inspector.get_columns("kyc_documents")}
+
+    with engine.begin() as conn:
+        # Older schema had back_image_url as NOT NULL; new flow allows front-only uploads.
+        if engine.dialect.name == "postgresql":
+            back_meta = columns.get("back_image_url")
+            if back_meta and back_meta.get("nullable") is False:
+                conn.execute(text('ALTER TABLE kyc_documents ALTER COLUMN "back_image_url" DROP NOT NULL'))
+
+
+def _migrate_document_binary_storage_schema() -> None:
+    inspector = inspect(engine)
+    bytes_type = "BYTEA" if engine.dialect.name == "postgresql" else "BLOB"
+
+    with engine.begin() as conn:
+        if "driver_licenses" in inspector.get_table_names():
+            license_columns = {col["name"] for col in inspector.get_columns("driver_licenses")}
+            if "license_image_data" not in license_columns:
+                conn.execute(text(f"ALTER TABLE driver_licenses ADD COLUMN license_image_data {bytes_type}"))
+            if "license_image_content_type" not in license_columns:
+                conn.execute(text("ALTER TABLE driver_licenses ADD COLUMN license_image_content_type VARCHAR"))
+            if "license_image_filename" not in license_columns:
+                conn.execute(text("ALTER TABLE driver_licenses ADD COLUMN license_image_filename VARCHAR"))
+
+        if "kyc_documents" in inspector.get_table_names():
+            kyc_columns = {col["name"] for col in inspector.get_columns("kyc_documents")}
+            if "front_image_data" not in kyc_columns:
+                conn.execute(text(f"ALTER TABLE kyc_documents ADD COLUMN front_image_data {bytes_type}"))
+            if "front_image_content_type" not in kyc_columns:
+                conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN front_image_content_type VARCHAR"))
+            if "front_image_filename" not in kyc_columns:
+                conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN front_image_filename VARCHAR"))
+            if "back_image_data" not in kyc_columns:
+                conn.execute(text(f"ALTER TABLE kyc_documents ADD COLUMN back_image_data {bytes_type}"))
+            if "back_image_content_type" not in kyc_columns:
+                conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN back_image_content_type VARCHAR"))
+            if "back_image_filename" not in kyc_columns:
+                conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN back_image_filename VARCHAR"))
+
 # Create DB tables (for SQLite / development). 
 # In production, use Alembic migrations.
 Base.metadata.create_all(bind=engine)
 _migrate_legacy_bookings_schema()
 _migrate_legacy_users_schema()
 _migrate_legacy_posts_schema()
+_migrate_legacy_kyc_schema()
+_migrate_document_binary_storage_schema()
 
 app = FastAPI(
     title="HamroRental API",
     description="A rental platform API for Nepal",
     version="1.0.0"
 )
+
+
+def _sanitize_for_json(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, list):
+        return [_sanitize_for_json(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_for_json(item) for key, item in value.items()}
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request, exc: RequestValidationError):
+    # Some multipart validation errors can contain raw bytes that are not UTF-8.
+    # Sanitize before serializing to avoid UnicodeDecodeError in FastAPI encoder.
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _sanitize_for_json(exc.errors())},
+    )
 
 # Read environment (default: development)
 ENV = os.getenv("ENVIRONMENT", "development")

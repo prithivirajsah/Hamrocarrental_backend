@@ -75,3 +75,32 @@ class AdminDashboardResponse(BaseModel):
     recent_bookings: List[DashboardBookingItem]
     recent_posts: List[DashboardPostItem]
     recent_contacts: List[DashboardContactItem]
+
+
+class DriverLicenseItem(BaseModel):
+    id: int
+    user_id: int
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    user_phone: Optional[str] = None
+    license_number: str
+    license_image_url: str
+    license_expiry_date: str
+    verification_status: str
+    rejection_reason: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class DriverLicenseVerifyRequest(BaseModel):
+    license_id: int
+    action: str  # "verify" or "reject"
+    rejection_reason: Optional[str] = None
+
+
+class DriverLicenseVerifyResponse(BaseModel):
+    id: int
+    user_id: int
+    verification_status: str
+    rejection_reason: Optional[str] = None
+    verified_at: Optional[datetime] = None
