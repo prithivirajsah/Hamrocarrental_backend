@@ -18,9 +18,13 @@ from models.booking import Booking  # noqa: F401
 from models.review import Review  # noqa: F401
 from models.driver_license import DriverLicense  # noqa: F401
 from models.kyc_document import KycDocument  # noqa: F401
+from models.hire_request import HireRequest  # noqa: F401
+from models.hire_request_message import HireRequestMessage  # noqa: F401
 from routers.auth import router as auth_router
 from routers.booking import router as booking_router
 from routers.contact import router as contact_router
+from routers.chat import router as chat_router
+from routers.hire_request import router as hire_request_router
 from routers.post import router as post_router
 from routers.user import router as user_router
 from routers.admin import router as admin_router
@@ -105,8 +109,6 @@ def _migrate_legacy_bookings_schema() -> None:
         if "note" not in column_names:
             conn.execute(text("ALTER TABLE bookings ADD COLUMN note TEXT"))
 
-        # Legacy schemas may keep old columns as NOT NULL even though the current
-        # API no longer writes to them (e.g. vehicle_type), causing insert errors.
         if engine.dialect.name == "postgresql":
             for legacy_column in ("vehicle_type", "pickup_date", "return_date", "dropoff_location"):
                 legacy_meta = columns.get(legacy_column)
@@ -169,11 +171,25 @@ def _migrate_legacy_kyc_schema() -> None:
     columns = {col["name"]: col for col in inspector.get_columns("kyc_documents")}
 
     with engine.begin() as conn:
-        # Older schema had back_image_url as NOT NULL; new flow allows front-only uploads.
+
         if engine.dialect.name == "postgresql":
             back_meta = columns.get("back_image_url")
             if back_meta and back_meta.get("nullable") is False:
                 conn.execute(text('ALTER TABLE kyc_documents ALTER COLUMN "back_image_url" DROP NOT NULL'))
+
+
+def _migrate_chat_schema() -> None:
+    inspector = inspect(engine)
+    if "hire_request_messages" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"]: col for col in inspector.get_columns("hire_request_messages")}
+
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            message_meta = columns.get("message")
+            if message_meta and message_meta.get("nullable") is True:
+                conn.execute(text('ALTER TABLE hire_request_messages ALTER COLUMN "message" SET NOT NULL'))
 
 
 def _migrate_document_binary_storage_schema() -> None:
@@ -212,6 +228,7 @@ _migrate_legacy_bookings_schema()
 _migrate_legacy_users_schema()
 _migrate_legacy_posts_schema()
 _migrate_legacy_kyc_schema()
+_migrate_chat_schema()
 _migrate_document_binary_storage_schema()
 
 app = FastAPI(
@@ -233,34 +250,42 @@ def _sanitize_for_json(value):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request, exc: RequestValidationError):
-    # Some multipart validation errors can contain raw bytes that are not UTF-8.
-    # Sanitize before serializing to avoid UnicodeDecodeError in FastAPI encoder.
     return JSONResponse(
         status_code=422,
         content={"detail": _sanitize_for_json(exc.errors())},
     )
 
-# Read environment (default: development)
 ENV = os.getenv("ENVIRONMENT", "development")
 DEBUG = ENV == "development"
 
 # CORS Allowed Origins
 if DEBUG:
-    origins = ["*"]  # Allow everything during development
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ]
 else:
     origins = [
         "https://hamrorental-frontend.vercel.app",
         "https://hamrorental.com.np",
-        "https://*.onrender.com",
-        "https://*.vercel.app",
-        "https://*.netlify.app",
     ]
+
+extra_origins = os.getenv("CORS_ORIGINS", "")
+if extra_origins:
+    origins.extend([item.strip() for item in extra_origins.split(",") if item.strip()])
+
+allow_credentials = "*" not in origins
 
 # Add CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_origin_regex=r"https://.*\.(onrender|vercel|netlify)\.app",
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -272,10 +297,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth_router)
 app.include_router(contact_router)
 app.include_router(post_router)
+app.include_router(chat_router)
+app.include_router(hire_request_router)
 app.include_router(booking_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(review_router)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Properly dispose of database connection pool on shutdown."""
+    try:
+        engine.dispose()
+    except Exception as e:
+        print(f"Error disposing engine during shutdown: {e}")
+
 
 @app.get("/")
 def root():

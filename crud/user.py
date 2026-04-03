@@ -19,7 +19,7 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     return db.query(User).filter(User.id == user_id).first()
 
 # Create new user
-def create_user(db: Session, user_in: UserCreate) -> User:
+def create_user(db: Session, user_in: UserCreate, commit: bool = True) -> User:
     hashed_pw = get_password_hash(user_in.password)
 
     db_user = User(
@@ -30,7 +30,10 @@ def create_user(db: Session, user_in: UserCreate) -> User:
     )
 
     db.add(db_user)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(db_user)
 
     return db_user

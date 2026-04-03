@@ -5,10 +5,10 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Request
-from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.requests import ClientDisconnect
 
 from database_connection import get_db
 
@@ -52,6 +52,7 @@ async def _save_license_document(file: UploadFile) -> Dict[str, Any]:
 
     return {
         "url": f"/static/uploads/licenses/{file_name}",
+        "path": file_path,
         "data": data,
         "content_type": file.content_type,
         "filename": file.filename or file_name,
@@ -62,7 +63,13 @@ async def _parse_driver_registration_payload(request: Request) -> Dict[str, Any]
     content_type = request.headers.get("content-type", "").lower()
 
     if "multipart/form-data" in content_type:
-        form = await request.form()
+        try:
+            form = await request.form()
+        except ClientDisconnect:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Client disconnected before completing upload.",
+            )
 
         payload: Dict[str, Any] = {
             "full_name": (form.get("full_name") or "").strip(),
@@ -77,6 +84,11 @@ async def _parse_driver_registration_payload(request: Request) -> Dict[str, Any]
 
     try:
         body = await request.json()
+    except ClientDisconnect:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client disconnected before completing request body.",
+        )
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -96,9 +108,51 @@ async def _parse_driver_registration_payload(request: Request) -> Dict[str, Any]
         "confirm_password": body.get("confirm_password") or "",
         "license_number": str(body.get("license_number") or "").strip(),
         "license_expiry": str(body.get("license_expiry") or body.get("license_expiry_date") or "").strip(),
-        "license_document_url": str(body.get("license_document_url") or "").strip(),
         "license_document": None,
     }
+
+
+async def _parse_login_payload(request: Request) -> Dict[str, str]:
+    content_type = request.headers.get("content-type", "").lower()
+
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except ClientDisconnect:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Client disconnected before completing request body.",
+            )
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid JSON payload.",
+            )
+
+        if not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Request payload must be an object.",
+            )
+
+        email = (payload.get("email") or payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+        return {"email": email, "password": password}
+
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        try:
+            form = await request.form()
+        except ClientDisconnect:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Client disconnected before completing request body.",
+            )
+        email = (form.get("username") or form.get("email") or "").strip()
+        password = form.get("password") or ""
+        return {"email": email, "password": password}
+
+    # Unknown/empty content type. Let endpoint validation return a clean 422.
+    return {"email": "", "password": ""}
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
@@ -139,40 +193,44 @@ async def register_driver(request: Request, db: Session = Depends(get_db)):
         )
 
     uploaded_doc = payload.get("license_document")
-    provided_doc_url = str(payload.get("license_document_url") or "").strip() or None
-    if not isinstance(uploaded_doc, (UploadFile, StarletteUploadFile)) and not provided_doc_url:
+    if not isinstance(uploaded_doc, (UploadFile, StarletteUploadFile)):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="license_document is required for driver registration",
+            detail="license_document upload is required for driver registration",
         )
 
-    user_data = user_in.model_copy(update={"role": "driver"})
-    user = create_user(db, user_data)
+    saved_document = await _save_license_document(uploaded_doc)
 
-    license_url: Optional[str] = None
-    license_data: Optional[bytes] = None
-    license_content_type: Optional[str] = None
-    license_filename: Optional[str] = None
-
-    if isinstance(uploaded_doc, (UploadFile, StarletteUploadFile)):
-        saved = await _save_license_document(uploaded_doc)
-        license_url = saved["url"]
-        license_data = saved["data"]
-        license_content_type = saved["content_type"]
-        license_filename = saved["filename"]
-    else:
-        license_url = provided_doc_url
-
-    create_driver_license(
-        db,
-        user_id=user.id,
-        license_number=license_number,
-        license_image_url=license_url,
-        license_expiry_date=license_expiry,
-        license_image_data=license_data,
-        license_image_content_type=license_content_type,
-        license_image_filename=license_filename,
-    )
+    try:
+        user_data = user_in.model_copy(update={"role": "driver"})
+        user = create_user(db, user_data, commit=False)
+        create_driver_license(
+            db,
+            user_id=user.id,
+            license_number=license_number,
+            license_image_url=saved_document["url"],
+            license_expiry_date=license_expiry,
+            license_image_data=saved_document["data"],
+            license_image_content_type=saved_document["content_type"],
+            license_image_filename=saved_document["filename"],
+            commit=False,
+        )
+        db.commit()
+        db.refresh(user)
+    except HTTPException:
+        db.rollback()
+        try:
+            os.remove(saved_document["path"])
+        except OSError:
+            pass
+        raise
+    except Exception:
+        db.rollback()
+        try:
+            os.remove(saved_document["path"])
+        except OSError:
+            pass
+        raise
 
     return user
 
@@ -180,17 +238,11 @@ async def register_driver(request: Request, db: Session = Depends(get_db)):
 async def login(
     request: Request,
     background_tasks: BackgroundTasks,
-    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    email = form_data.username
-    password = form_data.password
-
-    content_type = request.headers.get("content-type", "")
-    if "application/json" in content_type:
-        payload = await request.json()
-        email = (payload.get("email") or payload.get("username") or "").strip()
-        password = payload.get("password") or ""
+    credentials = await _parse_login_payload(request)
+    email = credentials["email"]
+    password = credentials["password"]
 
     if not email or not password:
         raise HTTPException(
@@ -216,17 +268,11 @@ async def login(
 async def driver_login(
     request: Request,
     background_tasks: BackgroundTasks,
-    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    email = (form_data.username or "").strip()
-    password = form_data.password or ""
-
-    content_type = request.headers.get("content-type", "")
-    if "application/json" in content_type:
-        payload = await request.json()
-        email = (payload.get("email") or payload.get("username") or "").strip()
-        password = payload.get("password") or ""
+    credentials = await _parse_login_payload(request)
+    email = credentials["email"]
+    password = credentials["password"]
 
     if not email or not password:
         raise HTTPException(

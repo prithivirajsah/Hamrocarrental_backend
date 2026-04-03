@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
@@ -16,7 +16,6 @@ from crud.user import (
     get_all_drivers,
     count_users_by_role,
     update_user_profile,
-    update_user_profile_image,
     update_user_role
 )
 from auth.jwt import get_current_user
@@ -44,8 +43,6 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 KYC_UPLOAD_DIR = "static/uploads/kyc"
 os.makedirs(KYC_UPLOAD_DIR, exist_ok=True)
-PROFILE_UPLOAD_DIR = "static/uploads/profiles"
-os.makedirs(PROFILE_UPLOAD_DIR, exist_ok=True)
 ALLOWED_KYC_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -53,12 +50,6 @@ ALLOWED_KYC_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
-}
-ALLOWED_PROFILE_TYPES = {
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/webp",
 }
 
 
@@ -84,23 +75,6 @@ async def _save_kyc_file(file: UploadFile) -> Dict[str, Any]:
         "filename": file.filename or file_name,
     }
 
-
-async def _save_profile_photo(file: UploadFile) -> str:
-    if file.content_type not in ALLOWED_PROFILE_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported profile image type: {file.content_type}",
-        )
-
-    extension = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
-    file_name = f"{uuid.uuid4().hex}{extension}"
-    file_path = os.path.join(PROFILE_UPLOAD_DIR, file_name)
-
-    data = await file.read()
-    with open(file_path, "wb") as output:
-        output.write(data)
-
-    return f"/static/uploads/profiles/{file_name}"
 
 # Role-based feature lists
 def get_role_features(role: str):
@@ -137,16 +111,6 @@ def update_current_user(
     current_user=Depends(get_current_user),
 ):
     return update_user_profile(db, current_user, payload)
-
-
-@router.post("/me/profile-photo", response_model=UserOut)
-async def update_current_user_profile_photo(
-    profile_photo: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    image_url = await _save_profile_photo(profile_photo)
-    return update_user_profile_image(db, current_user, image_url)
 
 # Home Page for logged-in users
 @router.get("/home")
@@ -241,10 +205,7 @@ def update_user_role_endpoint(
     updated_user = update_user_role(db, user_id, new_role.value)
     return updated_user
 
-
-# -------------------------------------------------
 # Driver: Upload License for verification
-# -------------------------------------------------
 @router.post("/driver/license", status_code=status.HTTP_201_CREATED)
 def upload_driver_license(
     license_data: DriverLicenseUpload,
@@ -355,9 +316,14 @@ def get_my_kyc_document(
 ):
     document = get_latest_user_kyc_document(db, current_user.id)
     if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No KYC document found")
+        return {
+            "has_document": False,
+            "document": None,
+        }
 
     return {
+        "has_document": True,
+        "document": {
         "id": document.id,
         "user_id": document.user_id,
         "document_type": document.document_type,
@@ -368,4 +334,13 @@ def get_my_kyc_document(
         "rejection_reason": document.rejection_reason,
         "reviewed_at": document.reviewed_at,
         "created_at": document.created_at,
+        },
     }
+
+
+@router.get("/kyc-document/me")
+def get_my_kyc_document_alias(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return get_my_kyc_document(db=db, current_user=current_user)

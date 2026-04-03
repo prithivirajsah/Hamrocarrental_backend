@@ -14,6 +14,7 @@ def create_driver_license(
     license_image_data: Optional[bytes] = None,
     license_image_content_type: Optional[str] = None,
     license_image_filename: Optional[str] = None,
+    commit: bool = True,
 ):
     """Create a new driver license verification record"""
     # Check if user already has a license
@@ -27,7 +28,10 @@ def create_driver_license(
         existing.license_image_filename = license_image_filename
         existing.license_expiry_date = license_expiry_date
         existing.verification_status = "pending"  # Reset to pending if someone resubmits
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         db.refresh(existing)
         return existing
     
@@ -42,7 +46,10 @@ def create_driver_license(
         verification_status="pending",
     )
     db.add(license)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(license)
     return license
 
