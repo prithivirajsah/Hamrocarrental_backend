@@ -55,9 +55,6 @@ class BookingOut(BaseModel):
     return_location: str
     start_date: date
     end_date: date
-    total_days: int
-    price_per_day: float
-    total_price: float
     status: BookingStatus
     note: Optional[str]
     created_at: datetime

@@ -45,9 +45,6 @@ def _to_booking_out(db: Session, booking) -> BookingOut:
         return_location=booking.return_location,
         start_date=booking.start_date,
         end_date=booking.end_date,
-        total_days=booking.total_days,
-        price_per_day=booking.price_per_day,
-        total_price=booking.total_price,
         status=booking.status,
         note=booking.note,
         created_at=booking.created_at,
@@ -275,3 +272,43 @@ def change_booking_status(
 
     updated = update_booking_status(db, booking=booking, status=payload.status.value)
     return _to_booking_out(db, updated)
+
+
+@router.patch("/{booking_id}/cancel", response_model=BookingCreateResponse, status_code=status.HTTP_200_OK)
+def cancel_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    booking = get_booking_by_id(db, booking_id=booking_id)
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    is_renter = booking.user_id == current_user.id
+    is_admin = current_user.role == "admin"
+    if not (is_renter or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to cancel this booking",
+        )
+
+    if booking.status == "cancelled":
+        return {
+            "message": "Booking is already cancelled.",
+            "booking": _to_booking_out(db, booking),
+        }
+
+    if booking.status not in {"pending", "confirmed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending or confirmed bookings can be cancelled",
+        )
+
+    updated = update_booking_status(db, booking=booking, status="cancelled")
+    return {
+        "message": "Booking cancelled successfully.",
+        "booking": _to_booking_out(db, updated),
+    }

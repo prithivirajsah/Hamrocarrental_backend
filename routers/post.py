@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -17,11 +18,18 @@ router = APIRouter(prefix="/posts", tags=["Posts"])
 
 UPLOAD_DIR = "static/uploads/posts"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/avif",
+}
 POST_CATEGORIES = [
     {"id": "all", "label": "All vehicles", "icon": "🚗"},
     {"id": "sedan", "label": "Sedan", "icon": "🚙"},
-    {"id": "cabriolet", "label": "Cabriolet", "icon": "🏎️"},
     {"id": "pickup", "label": "Pickup", "icon": "🛻"},
     {"id": "suv", "label": "SUV", "icon": "🚐"},
     {"id": "minivan", "label": "Minivan", "icon": "🚌"},
@@ -62,7 +70,10 @@ async def _save_images(files: Optional[List[UploadFile]]) -> List[str]:
     image_urls: List[str] = []
 
     for file in files:
-        if file.content_type not in ALLOWED_IMAGE_TYPES:
+        content_type = (file.content_type or "").lower()
+        # Some browsers/mobile devices send uncommon image types (e.g. HEIC) or
+        # omit content type; allow any image/* while still rejecting non-images.
+        if content_type and content_type not in ALLOWED_IMAGE_TYPES and not content_type.startswith("image/"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported image type: {file.content_type}",
@@ -104,6 +115,35 @@ def _normalize_features_input(raw_features: Any) -> List[str]:
     )
 
 
+def _extract_features(data: Dict[str, Any]) -> List[str]:
+    """Collect features from common payload formats without limiting count."""
+    collected: List[str] = []
+
+    primary_features = _pick_value(data, "features", "features[]", "feature", "feature[]")
+    if primary_features is not None:
+        normalized = _normalize_features_input(primary_features)
+        if normalized:
+            collected.extend(normalized)
+
+    # Support dynamic keys such as feature1, feature_2, feature[3], etc.
+    dynamic_feature_key = re.compile(r"^feature(?:\[\d+\]|[_-]?\d+)?$", re.IGNORECASE)
+    for key, raw_value in data.items():
+        if not isinstance(key, str):
+            continue
+
+        lowered = key.lower()
+        if lowered in {"features", "features[]", "feature", "feature[]"}:
+            continue
+        if not dynamic_feature_key.match(lowered):
+            continue
+
+        normalized = _normalize_features_input(raw_value)
+        if normalized:
+            collected.extend(normalized)
+
+    return collected
+
+
 async def _build_payload_from_request(request: Request) -> PostCreate:
     content_type = request.headers.get("content-type", "").lower()
 
@@ -115,10 +155,19 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
 
         for key, value in form.multi_items():
             if _is_uploaded_file(value):
-                if key in {"images", "files"}:
+                if key in {"images", "images[]", "image", "files", "file"}:
                     image_files.append(value)
                 continue
-            form_data[key] = value
+
+            # Keep repeated form keys (e.g. features[] sent multiple times).
+            if key in form_data:
+                existing = form_data[key]
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    form_data[key] = [existing, value]
+            else:
+                form_data[key] = value
 
         return PostCreate(
             post_title=str(_pick_value(form_data, "post_title", "postTitle") or ""),
@@ -127,7 +176,7 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
             location=str(_pick_value(form_data, "location") or ""),
             contact_number=str(_pick_value(form_data, "contact_number", "contactNumber") or ""),
             description=str(_pick_value(form_data, "description") or ""),
-            features=_normalize_features_input(_pick_value(form_data, "features")),
+            features=_extract_features(form_data),
             image_urls=await _save_images(image_files),
         )
 
@@ -152,7 +201,7 @@ async def _build_payload_from_request(request: Request) -> PostCreate:
         location=str(_pick_value(body, "location") or ""),
         contact_number=str(_pick_value(body, "contact_number", "contactNumber") or ""),
         description=str(_pick_value(body, "description") or ""),
-        features=_normalize_features_input(_pick_value(body, "features")),
+        features=_extract_features(body),
         image_urls=[
             str(url).strip()
             for url in (_pick_value(body, "image_urls", "imageUrls") or [])
@@ -246,10 +295,19 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
 
         for key, value in form.multi_items():
             if _is_uploaded_file(value):
-                if key in {"images", "files"}:
+                if key in {"images", "images[]", "image", "files", "file"}:
                     image_files.append(value)
                 continue
-            form_data[key] = value
+
+            # Keep repeated form keys (e.g. features[] sent multiple times).
+            if key in form_data:
+                existing = form_data[key]
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    form_data[key] = [existing, value]
+            else:
+                form_data[key] = value
 
         raw_existing = _pick_value(form_data, "existing_image_urls", "existingImageUrls")
         existing_urls: List[str] = []
@@ -271,7 +329,7 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
             location=str(_pick_value(form_data, "location") or ""),
             contact_number=str(_pick_value(form_data, "contact_number", "contactNumber") or ""),
             description=str(_pick_value(form_data, "description") or ""),
-            features=_normalize_features_input(_pick_value(form_data, "features")),
+            features=_extract_features(form_data),
             image_urls=combined_image_urls,
         )
         return payload, existing_urls
@@ -309,7 +367,7 @@ async def _build_update_payload_from_request(request: Request) -> tuple[PostCrea
         location=str(_pick_value(body, "location") or ""),
         contact_number=str(_pick_value(body, "contact_number", "contactNumber") or ""),
         description=str(_pick_value(body, "description") or ""),
-        features=_normalize_features_input(_pick_value(body, "features")),
+        features=_extract_features(body),
         image_urls=combined_image_urls,
     )
     return payload, existing_urls

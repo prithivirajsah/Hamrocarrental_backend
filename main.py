@@ -221,6 +221,46 @@ def _migrate_document_binary_storage_schema() -> None:
             if "back_image_filename" not in kyc_columns:
                 conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN back_image_filename VARCHAR"))
 
+
+def _migrate_reviews_post_fk_cascade() -> None:
+    """Ensure reviews.post_id uses ON DELETE CASCADE in legacy PostgreSQL schemas."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(engine)
+    if "reviews" not in inspector.get_table_names() or "posts" not in inspector.get_table_names():
+        return
+
+    foreign_keys = inspector.get_foreign_keys("reviews")
+    reviews_post_fk = None
+    for foreign_key in foreign_keys:
+        constrained = foreign_key.get("constrained_columns") or []
+        referred_table = foreign_key.get("referred_table")
+        if constrained == ["post_id"] and referred_table == "posts":
+            reviews_post_fk = foreign_key
+            break
+
+    if not reviews_post_fk:
+        return
+
+    ondelete = (reviews_post_fk.get("options") or {}).get("ondelete")
+    if isinstance(ondelete, str) and ondelete.upper() == "CASCADE":
+        return
+
+    constraint_name = reviews_post_fk.get("name")
+    if not constraint_name:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text(f'ALTER TABLE reviews DROP CONSTRAINT IF EXISTS "{constraint_name}"'))
+        conn.execute(
+            text(
+                "ALTER TABLE reviews "
+                "ADD CONSTRAINT reviews_post_id_fkey "
+                "FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE"
+            )
+        )
+
 # Create DB tables (for SQLite / development). 
 # In production, use Alembic migrations.
 Base.metadata.create_all(bind=engine)
@@ -230,6 +270,7 @@ _migrate_legacy_posts_schema()
 _migrate_legacy_kyc_schema()
 _migrate_chat_schema()
 _migrate_document_binary_storage_schema()
+_migrate_reviews_post_fk_cascade()
 
 app = FastAPI(
     title="HamroRental API",
