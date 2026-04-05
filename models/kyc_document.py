@@ -8,7 +8,7 @@ class KycDocument(Base):
     __tablename__ = "kyc_documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     document_type = Column(String, nullable=False)
     document_number = Column(String, nullable=False)
     front_image_url = Column(String, nullable=False)
@@ -27,6 +27,6 @@ class KycDocument(Base):
     )
     rejection_reason = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
-    reviewed_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_by_admin_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

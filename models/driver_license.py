@@ -8,7 +8,7 @@ class DriverLicense(Base):
     __tablename__ = "driver_licenses"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     license_number = Column(String, nullable=False)
     license_image_url = Column(String, nullable=False)
     license_image_data = Column(LargeBinary, nullable=True)
@@ -23,6 +23,6 @@ class DriverLicense(Base):
     )
     rejection_reason = Column(Text, nullable=True)  # Reason if rejected
     verified_at = Column(DateTime(timezone=True), nullable=True)
-    verified_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified_by_admin_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

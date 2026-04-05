@@ -13,13 +13,21 @@ from crud.review import (
     get_reviews,
     get_reviews_by_post,
     get_reviews_by_user,
+    get_review_reminders_for_user,
     has_user_review_for_post,
     update_review,
     update_review_likes,
 )
 from crud.user import get_user_by_id
 from database_connection import get_db
-from schemas.review import ReviewCreate, ReviewCreateResponse, ReviewLikeUpdate, ReviewOut, ReviewUpdate
+from schemas.review import (
+    ReviewCreate,
+    ReviewCreateResponse,
+    ReviewLikeUpdate,
+    ReviewOut,
+    ReviewReminderOut,
+    ReviewUpdate,
+)
 
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -106,6 +114,18 @@ def list_my_reviews(
 
     records = get_reviews_by_user(db, user_id=current_user.id, skip=safe_skip, limit=safe_limit)
     return [_to_review_out(db, review) for review in records]
+
+
+@router.get("/reminders/me", response_model=List[ReviewReminderOut], status_code=status.HTTP_200_OK)
+def list_my_review_reminders(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    return get_review_reminders_for_user(db, user_id=current_user.id, skip=safe_skip, limit=safe_limit)
 
 
 @router.patch("/{review_id}", response_model=ReviewOut, status_code=status.HTTP_200_OK)

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -65,3 +65,18 @@ class ReviewOut(BaseModel):
 class ReviewCreateResponse(BaseModel):
     message: str
     review: ReviewOut
+
+
+class ReviewReminderOut(BaseModel):
+    booking_id: int
+    post_id: int
+    vehicle_name: Optional[str] = None
+    owner_id: int
+    start_date: date
+    end_date: date
+    completed_at: datetime
+    message: str = "Your rental is completed. Please leave a review."
+
+    model_config = {
+        "from_attributes": True,
+    }

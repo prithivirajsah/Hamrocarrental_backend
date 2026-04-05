@@ -222,6 +222,62 @@ def _migrate_document_binary_storage_schema() -> None:
                 conn.execute(text("ALTER TABLE kyc_documents ADD COLUMN back_image_filename VARCHAR"))
 
 
+def _migrate_user_fk_actions() -> None:
+    """Align legacy user foreign keys with the current delete behavior."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(engine)
+    user_fk_actions = {
+        "driver_licenses": {"user_id": "CASCADE", "verified_by_admin_id": "SET NULL"},
+        "kyc_documents": {"user_id": "CASCADE", "reviewed_by_admin_id": "SET NULL"},
+        "posts": {"owner_id": "CASCADE"},
+        "bookings": {"user_id": "CASCADE", "owner_id": "CASCADE"},
+        "reviews": {"user_id": "CASCADE"},
+        "hire_requests": {
+            "requester_id": "CASCADE",
+            "owner_id": "CASCADE",
+            "reviewed_by_admin_id": "SET NULL",
+        },
+        "hire_request_messages": {"sender_id": "CASCADE"},
+    }
+
+    with engine.begin() as conn:
+        for table_name, column_actions in user_fk_actions.items():
+            if table_name not in inspector.get_table_names():
+                continue
+
+            for foreign_key in inspector.get_foreign_keys(table_name):
+                if foreign_key.get("referred_table") != "users":
+                    continue
+
+                constrained_columns = foreign_key.get("constrained_columns") or []
+                if len(constrained_columns) != 1:
+                    continue
+
+                column_name = constrained_columns[0]
+                desired_action = column_actions.get(column_name)
+                if not desired_action:
+                    continue
+
+                current_action = (foreign_key.get("options") or {}).get("ondelete")
+                if isinstance(current_action, str) and current_action.upper() == desired_action:
+                    continue
+
+                constraint_name = foreign_key.get("name")
+                if not constraint_name:
+                    continue
+
+                conn.execute(text(f'ALTER TABLE {table_name} DROP CONSTRAINT IF EXISTS "{constraint_name}"'))
+                conn.execute(
+                    text(
+                        f'ALTER TABLE {table_name} '
+                        f'ADD CONSTRAINT {constraint_name} '
+                        f'FOREIGN KEY ({column_name}) REFERENCES users(id) ON DELETE {desired_action}'
+                    )
+                )
+
+
 def _migrate_reviews_post_fk_cascade() -> None:
     """Ensure reviews.post_id uses ON DELETE CASCADE in legacy PostgreSQL schemas."""
     if engine.dialect.name != "postgresql":
@@ -270,6 +326,7 @@ _migrate_legacy_posts_schema()
 _migrate_legacy_kyc_schema()
 _migrate_chat_schema()
 _migrate_document_binary_storage_schema()
+_migrate_user_fk_actions()
 _migrate_reviews_post_fk_cascade()
 
 app = FastAPI(
