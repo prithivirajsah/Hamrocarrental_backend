@@ -54,7 +54,6 @@ def _to_hire_request_out(db: Session, hire_request) -> HireRequestOut:
         vehicle_name=getattr(post, "post_title", None),
     )
 
-
 @router.post("", response_model=HireRequestCreateResponse, status_code=status.HTTP_201_CREATED)
 def add_hire_request(
     payload: HireRequestCreate,

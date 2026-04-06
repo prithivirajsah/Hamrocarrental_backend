@@ -15,6 +15,7 @@ from database_connection import get_db
 from auth.jwt import authenticate_user, create_access_token, get_current_user
 from crud.user import get_user_by_email, create_user
 from crud.driver_license import create_driver_license
+from crud.driver_license import get_driver_license_by_user_id
 from utils.password_validation import validate_password_strength, get_password_requirements
 from utils.email_service import send_account_created_login_email
 from schemas.user import UserCreate, UserOut, LoginResponse
@@ -287,6 +288,14 @@ async def driver_login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Backfill legacy accounts: if a license exists, this user should be treated as a driver.
+    if user.role != "driver":
+        existing_license = get_driver_license_by_user_id(db, user.id)
+        if existing_license:
+            user.role = "driver"
+            db.commit()
+            db.refresh(user)
 
     if user.role != "driver":
         raise HTTPException(

@@ -83,6 +83,7 @@ class DriverLicenseItem(BaseModel):
     user_name: Optional[str] = None
     user_email: Optional[str] = None
     user_phone: Optional[str] = None
+    user_profile_image_url: Optional[str] = None
     license_number: str
     license_image_url: str
     license_expiry_date: str

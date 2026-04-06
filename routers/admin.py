@@ -1,6 +1,8 @@
+import os
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_admin
@@ -16,6 +18,7 @@ from crud.admin import (
 )
 from crud.kyc import get_admin_kyc_documents, update_kyc_status
 from database_connection import get_db
+from models.driver_license import DriverLicense
 from schemas.admin import (
     AdminDashboardResponse,
     AdminPostListItem,
@@ -113,6 +116,30 @@ def get_all_licenses(
 ):
     """Get all driver licenses with optional status filter"""
     return get_all_driver_licenses(db, skip=skip, limit=limit, status=status)
+
+
+@router.get("/driver-licenses/{license_id}/image", include_in_schema=False)
+def get_driver_license_image(
+    license_id: int,
+    db: Session = Depends(get_db),
+):
+    license_row = db.query(DriverLicense).filter(DriverLicense.id == license_id).first()
+    if not license_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+
+    if license_row.license_image_data:
+        return Response(
+            content=license_row.license_image_data,
+            media_type=license_row.license_image_content_type or "application/octet-stream",
+        )
+
+    image_url = (license_row.license_image_url or "").strip()
+    if image_url.startswith("/static/uploads/licenses/"):
+        file_path = image_url.lstrip("/")
+        if os.path.isfile(file_path):
+            return FileResponse(path=file_path)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License image not found")
 
 
 @router.post("/driver-license/verify", response_model=DriverLicenseVerifyResponse, status_code=status.HTTP_200_OK)

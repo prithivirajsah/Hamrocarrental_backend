@@ -10,6 +10,25 @@ from models.user import User
 from models.driver_license import DriverLicense
 
 
+def _build_driver_license_item(license: DriverLicense, user: Optional[User]):
+    return {
+        "id": license.id,
+        "user_id": license.user_id,
+        "user_name": getattr(user, "full_name", None),
+        "user_email": getattr(user, "email", None),
+        "user_phone": getattr(user, "phone", None),
+        "user_profile_image_url": getattr(user, "profile_image_url", None),
+        "license_number": license.license_number,
+        # Use a stable API endpoint so images can be rendered from DB-backed binary data.
+        "license_image_url": f"/admin/driver-licenses/{license.id}/image",
+        "license_expiry_date": license.license_expiry_date,
+        "verification_status": license.verification_status,
+        "rejection_reason": license.rejection_reason,
+        "verified_at": license.verified_at,
+        "created_at": license.created_at,
+    }
+
+
 def get_admin_users(
     db: Session,
     skip: int = 0,
@@ -246,21 +265,11 @@ def get_pending_driver_licenses(
         .all()
     )
     
-    return [
-        {
-            "id": license.id,
-            "user_id": license.user_id,
-            "user_name": getattr(user, "full_name", None),
-            "user_email": getattr(user, "email", None),
-            "user_phone": getattr(user, "phone", None),
-            "license_number": license.license_number,
-            "license_image_url": license.license_image_url,
-            "license_expiry_date": license.license_expiry_date,
-            "verification_status": license.verification_status,
-            "created_at": license.created_at,
-        }
-        for license, user in licenses
-    ]
+    items = [_build_driver_license_item(license, user) for license, user in licenses]
+    for item in items:
+        item.pop("rejection_reason", None)
+        item.pop("verified_at", None)
+    return items
 
 
 def get_all_driver_licenses(
@@ -283,23 +292,7 @@ def get_all_driver_licenses(
         .all()
     )
     
-    return [
-        {
-            "id": license.id,
-            "user_id": license.user_id,
-            "user_name": getattr(user, "full_name", None),
-            "user_email": getattr(user, "email", None),
-            "user_phone": getattr(user, "phone", None),
-            "license_number": license.license_number,
-            "license_image_url": license.license_image_url,
-            "license_expiry_date": license.license_expiry_date,
-            "verification_status": license.verification_status,
-            "rejection_reason": license.rejection_reason,
-            "verified_at": license.verified_at,
-            "created_at": license.created_at,
-        }
-        for license, user in licenses
-    ]
+    return [_build_driver_license_item(license, user) for license, user in licenses]
 
 
 def verify_driver_license(

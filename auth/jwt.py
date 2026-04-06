@@ -14,7 +14,7 @@ from utils.password_validation import verify_password, get_password_hash
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-please!!!")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7)))  # 7 days default
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours only
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)

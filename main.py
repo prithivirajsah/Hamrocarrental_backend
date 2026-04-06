@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
@@ -336,6 +336,14 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def cache_uploaded_assets(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/uploads/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
+
 def _sanitize_for_json(value):
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
@@ -415,6 +423,16 @@ async def shutdown_event():
 @app.get("/")
 def root():
     return {"message": "HamroRental API is running!"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
+
+
+@app.head("/favicon.ico", include_in_schema=False)
+def favicon_head():
+    return Response(status_code=204)
 
 
 @app.get("/home")

@@ -14,14 +14,14 @@ class DriverLicense(Base):
     license_image_data = Column(LargeBinary, nullable=True)
     license_image_content_type = Column(String, nullable=True)
     license_image_filename = Column(String, nullable=True)
-    license_expiry_date = Column(String, nullable=False)  # Format: YYYY-MM-DD
+    license_expiry_date = Column(String, nullable=False)  
     verification_status = Column(
         Enum("pending", "verified", "rejected", name="license_verification_status"),
         nullable=False,
         default="pending",
         index=True
     )
-    rejection_reason = Column(Text, nullable=True)  # Reason if rejected
+    rejection_reason = Column(Text, nullable=True)  
     verified_at = Column(DateTime(timezone=True), nullable=True)
     verified_by_admin_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
