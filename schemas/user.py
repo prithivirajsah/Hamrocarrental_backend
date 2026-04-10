@@ -93,3 +93,42 @@ class Token(BaseModel):
 class LoginResponse(Token):
     user: UserOut
     message: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+    confirm_password: str
+
+    @field_validator("token", "password", "confirm_password")
+    @classmethod
+    def not_empty(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not any(c.isupper() for c in value):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in value):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in value):
+            raise ValueError("Password must contain at least one number")
+        if not any(c in "!@#$%^&*(),.?\":{}|<>" for c in value):
+            raise ValueError("Password must contain at least one special character")
+        return value
+
+    @model_validator(mode="after")
+    def passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self

@@ -2,9 +2,11 @@
 import json
 import os
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Request
+from jose import JWTError, jwt
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -12,18 +14,41 @@ from starlette.requests import ClientDisconnect
 
 from database_connection import get_db
 
-from auth.jwt import authenticate_user, create_access_token, get_current_user
+from auth.jwt import ALGORITHM, SECRET_KEY, authenticate_user, create_access_token, get_current_user
 from crud.user import get_user_by_email, create_user
 from crud.driver_license import create_driver_license
 from crud.driver_license import get_driver_license_by_user_id
-from utils.password_validation import validate_password_strength, get_password_requirements
-from utils.email_service import send_account_created_email, send_login_notification_email
-from schemas.user import UserCreate, UserOut, LoginResponse
+from utils.password_validation import get_password_hash, get_password_requirements, validate_password_strength
+from utils.email_service import send_account_created_email, send_login_notification_email, send_password_reset_email
+from schemas.user import ForgotPasswordRequest, LoginResponse, ResetPasswordRequest, UserCreate, UserOut
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 LICENSE_UPLOAD_DIR = "static/uploads/licenses"
 os.makedirs(LICENSE_UPLOAD_DIR, exist_ok=True)
 ALLOWED_LICENSE_TYPES = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
+PASSWORD_RESET_EXPIRE_MINUTES = 30
+
+
+def _create_password_reset_token(email: str) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES)
+    payload = {
+        "sub": email,
+        "type": "password_reset",
+        "exp": expire,
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _decode_password_reset_token(token: str) -> str:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        token_type = payload.get("type")
+        email = payload.get("sub")
+        if token_type != "password_reset" or not email:
+            raise ValueError("Invalid token payload")
+        return str(email)
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
 
 
 async def _save_license_document(file: UploadFile) -> Dict[str, Any]:
@@ -322,6 +347,51 @@ def validate_password(request: dict):
 @router.get("/password-requirements")
 def password_requirements():
     return get_password_requirements()
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    normalized_email = payload.email.strip().lower()
+    user = get_user_by_email(db, normalized_email)
+
+    # Keep response generic so email existence cannot be enumerated.
+    response = {
+        "message": "If an account exists for this email, a password reset link has been sent.",
+    }
+
+    if not user:
+        return response
+
+    token = _create_password_reset_token(user.email)
+    frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
+    reset_base_url = os.getenv("FRONTEND_RESET_PASSWORD_URL") or f"{frontend_url}/reset-password"
+    reset_url = f"{reset_base_url}?token={token}"
+    background_tasks.add_task(send_password_reset_email, user.email, user.full_name, reset_url)
+    return response
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    email = _decode_password_reset_token(payload.token)
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+
+    valid, errors = validate_password_strength(payload.password)
+    if not valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors[0])
+
+    user.hashed_password = get_password_hash(payload.password)
+    db.commit()
+    db.refresh(user)
+    return {"message": "Password reset successful. Please log in with your new password."}
 
 
 @router.get("/session")

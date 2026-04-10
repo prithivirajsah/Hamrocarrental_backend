@@ -116,7 +116,7 @@ def update_current_user(
 @router.get("/home")
 def home_page(current_user=Depends(get_current_user)):
     return {
-        "message": f"Welcome to HamroRental, {current_user.full_name}!",
+        "message": f"Welcome to Hamro Car Rental, {current_user.full_name}!",
         "user_role": current_user.role,
         "user_id": current_user.id,
         "features": {

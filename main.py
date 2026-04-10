@@ -330,7 +330,7 @@ _migrate_user_fk_actions()
 _migrate_reviews_post_fk_cascade()
 
 app = FastAPI(
-    title="HamroRental API",
+    title="Hamro Car Rental API",
     description="A rental platform API for Nepal",
     version="1.0.0"
 )
@@ -422,7 +422,7 @@ async def shutdown_event():
 
 @app.get("/")
 def root():
-    return {"message": "HamroRental API is running!"}
+    return {"message": "Hamro Car Rental API is running!"}
 
 
 @app.get("/favicon.ico", include_in_schema=False)

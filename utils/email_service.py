@@ -1,7 +1,11 @@
 import os
 import smtplib
+import logging
 from email.message import EmailMessage
 from typing import Any, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 def _is_email_configured() -> bool:
@@ -23,14 +27,19 @@ def _email_address(user: Any, fallback: Optional[str] = None) -> Optional[str]:
 
 def _send_email(to_email: Optional[str], subject: str, body: str, reply_to: Optional[str] = None) -> bool:
     if not to_email or not _is_email_configured():
+        if not to_email:
+            logger.warning("Email skipped: recipient address is missing")
+        else:
+            logger.warning("Email skipped: SMTP environment variables are incomplete")
         return False
 
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    mail_from = os.getenv("MAIL_FROM") or smtp_username
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int((os.getenv("SMTP_PORT", "587") or "587").strip())
+    smtp_username = (os.getenv("SMTP_USERNAME") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    mail_from = (os.getenv("MAIL_FROM") or smtp_username).strip()
     use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -41,28 +50,32 @@ def _send_email(to_email: Optional[str], subject: str, body: str, reply_to: Opti
     msg.set_content(body)
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
-            if use_tls:
+        smtp_client = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_client(smtp_host, smtp_port, timeout=20) as server:
+            if os.getenv("SMTP_DEBUG", "false").lower() == "true":
+                server.set_debuglevel(1)
+            if use_tls and not use_ssl:
                 server.starttls()
             server.login(smtp_username, smtp_password)
             server.send_message(msg)
         return True
-    except Exception:
+    except Exception as exc:
+        logger.exception("Failed to send email via SMTP: %s", exc)
         return False
 
 
 def send_login_notification_email(to_email: str, full_name: str) -> bool:
     return _send_email(
         to_email,
-        "HamroRental Login Notification",
+        "Hamro Car Rental Login Notification",
         f"""Hi {full_name},
 
-Your HamroRental account was just used to sign in successfully.
+Your Hamro Car Rental account was just used to sign in successfully.
 
 If this was not you, please reset your password immediately.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
 
@@ -70,15 +83,36 @@ HamroRental Team
 def send_account_created_email(to_email: str, full_name: str, role: str = "user") -> bool:
     return _send_email(
         to_email,
-        "Welcome to HamroRental",
+        "Welcome to Hamro Car Rental",
         f"""Hi {full_name},
 
-Your HamroRental {role} account is ready.
+Your Hamro Car Rental {role} account is ready.
 
 You can now sign in and use the platform.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
+""",
+    )
+
+
+def send_password_reset_email(to_email: str, full_name: str, reset_url: str) -> bool:
+    return _send_email(
+        to_email,
+        "Hamro Car Rental Password Reset",
+        f"""Hi {full_name},
+
+We received a request to reset your Hamro Car Rental password.
+
+Reset your password using this link:
+{reset_url}
+
+This link expires in 30 minutes.
+
+If you did not request this, you can safely ignore this email.
+
+Thank you,
+Hamro Car Rental Team
 """,
     )
 
@@ -113,7 +147,7 @@ Your booking request has been created successfully.
 We will notify you when the booking changes status.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     owner_sent = _send_email(
@@ -128,7 +162,7 @@ A new booking request has been created for your vehicle.
 Please review it in the dashboard.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     return renter_sent or owner_sent
@@ -151,7 +185,7 @@ Your booking status has been updated to: {new_status}.
 {summary}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     owner_sent = _send_email(
@@ -164,7 +198,7 @@ A booking on your vehicle was updated to: {new_status}.
 {summary}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     return renter_sent or owner_sent
@@ -188,7 +222,7 @@ Your booking has been cancelled by {cancelled_by_name}.
 {summary}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     owner_sent = _send_email(
@@ -201,7 +235,7 @@ The booking has been cancelled by {cancelled_by_name}.
 {summary}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     return renter_sent or owner_sent
@@ -234,7 +268,7 @@ Your hire request has been created successfully.
 We will notify you when the request is reviewed.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     owner_sent = _send_email(
@@ -249,7 +283,7 @@ A new hire request has been created for your vehicle.
 Please review it in the dashboard.
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     return requester_sent or owner_sent
@@ -288,7 +322,7 @@ Your hire request status has been updated to: {new_status}.
 {summary_text}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     owner_sent = _send_email(
@@ -301,7 +335,7 @@ A hire request on your vehicle was updated to: {new_status}.
 {summary_text}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """,
     )
     return requester_sent or owner_sent
@@ -319,7 +353,7 @@ Subject: {getattr(contact, 'subject', 'N/A')}
 Topic: {getattr(contact, 'topic', 'N/A')}
 
 Thank you,
-HamroRental Team
+Hamro Car Rental Team
 """
     return _send_email(email, subject, body)
 
