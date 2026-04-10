@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user
@@ -20,6 +20,11 @@ from crud.booking import (
 from crud.post import get_post_by_id
 from crud.user import get_user_by_id
 from database_connection import get_db
+from utils.email_service import (
+    send_booking_cancelled_email,
+    send_booking_created_email,
+    send_booking_status_updated_email,
+)
 from schemas.booking import (
     BookingAvailabilityResponse,
     BookingCreate,
@@ -57,6 +62,7 @@ def _to_booking_out(db: Session, booking) -> BookingOut:
 @router.post("", response_model=BookingCreateResponse, status_code=status.HTTP_201_CREATED)
 def add_booking(
     payload: BookingCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -140,6 +146,10 @@ def add_booking(
         total_price=total_price,
         note=payload.note,
     )
+
+    renter = get_user_by_id(db, booking.user_id)
+    owner = get_user_by_id(db, booking.owner_id)
+    background_tasks.add_task(send_booking_created_email, renter, owner, booking, post)
 
     return {
         "message": "Booking created successfully.",
@@ -254,6 +264,7 @@ def get_booking_details(
 def change_booking_status(
     booking_id: int,
     payload: BookingStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -270,13 +281,18 @@ def change_booking_status(
             detail="Booking not found",
         )
 
+    post = get_post_by_id(db, booking.post_id)
     updated = update_booking_status(db, booking=booking, status=payload.status.value)
+    renter = get_user_by_id(db, updated.user_id)
+    owner = get_user_by_id(db, updated.owner_id)
+    background_tasks.add_task(send_booking_status_updated_email, renter, owner, updated, payload.status.value, post)
     return _to_booking_out(db, updated)
 
 
 @router.patch("/{booking_id}/cancel", response_model=BookingCreateResponse, status_code=status.HTTP_200_OK)
 def cancel_booking(
     booking_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -307,7 +323,11 @@ def cancel_booking(
             detail="Only pending or confirmed bookings can be cancelled",
         )
 
+    post = get_post_by_id(db, booking.post_id)
     updated = update_booking_status(db, booking=booking, status="cancelled")
+    renter = get_user_by_id(db, updated.user_id)
+    owner = get_user_by_id(db, updated.owner_id)
+    background_tasks.add_task(send_booking_cancelled_email, renter, owner, updated, current_user, post)
     return {
         "message": "Booking cancelled successfully.",
         "booking": _to_booking_out(db, updated),

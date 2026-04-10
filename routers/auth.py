@@ -17,7 +17,7 @@ from crud.user import get_user_by_email, create_user
 from crud.driver_license import create_driver_license
 from crud.driver_license import get_driver_license_by_user_id
 from utils.password_validation import validate_password_strength, get_password_requirements
-from utils.email_service import send_account_created_login_email
+from utils.email_service import send_account_created_email, send_login_notification_email
 from schemas.user import UserCreate, UserOut, LoginResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -156,7 +156,7 @@ async def _parse_login_payload(request: Request) -> Dict[str, str]:
     return {"email": "", "password": ""}
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(user_in: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     # Lowercase email
     email = user_in.email.lower()
     if get_user_by_email(db, email):
@@ -164,11 +164,12 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     # create
     user_data = user_in.model_copy(update={"role": "user"})
     user = create_user(db, user_data)
+    background_tasks.add_task(send_account_created_email, user.email, user.full_name, user.role)
     return user
 
 
 @router.post("/register-driver", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register_driver(request: Request, db: Session = Depends(get_db)):
+async def register_driver(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     payload = await _parse_driver_registration_payload(request)
 
     try:
@@ -218,6 +219,7 @@ async def register_driver(request: Request, db: Session = Depends(get_db)):
         )
         db.commit()
         db.refresh(user)
+        background_tasks.add_task(send_account_created_email, user.email, user.full_name, user.role)
     except HTTPException:
         db.rollback()
         try:
@@ -257,7 +259,7 @@ async def login(
                             detail="Incorrect email or password",
                             headers={"WWW-Authenticate": "Bearer"})
     access_token = create_access_token(data={"sub": user.email})
-    background_tasks.add_task(send_account_created_login_email, user.email, user.full_name)
+    background_tasks.add_task(send_login_notification_email, user.email, user.full_name)
     return {
         "access_token": access_token,
         "user": UserOut.from_orm(user),
@@ -304,7 +306,7 @@ async def driver_login(
         )
 
     access_token = create_access_token(data={"sub": user.email})
-    background_tasks.add_task(send_account_created_login_email, user.email, user.full_name)
+    background_tasks.add_task(send_login_notification_email, user.email, user.full_name)
     return {
         "access_token": access_token,
         "user": UserOut.from_orm(user),

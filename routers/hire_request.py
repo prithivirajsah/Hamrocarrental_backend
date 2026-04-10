@@ -2,6 +2,7 @@ from datetime import date
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user, get_current_admin
@@ -21,6 +22,10 @@ from schemas.hire_request import (
     HireRequestCreateResponse,
     HireRequestOut,
     HireRequestStatusUpdate,
+)
+from utils.email_service import (
+    send_hire_request_created_email,
+    send_hire_request_status_updated_email,
 )
 
 router = APIRouter(prefix="/hire-requests", tags=["Hire Requests"])
@@ -57,6 +62,7 @@ def _to_hire_request_out(db: Session, hire_request) -> HireRequestOut:
 @router.post("", response_model=HireRequestCreateResponse, status_code=status.HTTP_201_CREATED)
 def add_hire_request(
     payload: HireRequestCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -82,6 +88,10 @@ def add_hire_request(
         requested_price=payload.requested_price,
         note=payload.note,
     )
+
+    requester = get_user_by_id(db, hire_request.requester_id)
+    owner = get_user_by_id(db, hire_request.owner_id)
+    background_tasks.add_task(send_hire_request_created_email, requester, owner, hire_request, post)
 
     return {
         "message": "Hire request created successfully.",
@@ -156,6 +166,7 @@ def get_hire_request_details(
 def change_hire_request_status(
     hire_request_id: int,
     payload: HireRequestStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
@@ -174,6 +185,9 @@ def change_hire_request_status(
         admin_id=current_admin.id,
         rejection_reason=payload.rejection_reason,
     )
+    requester = get_user_by_id(db, updated.requester_id)
+    owner = get_user_by_id(db, updated.owner_id)
+    background_tasks.add_task(send_hire_request_status_updated_email, requester, owner, updated, normalized, payload.rejection_reason)
     return _to_hire_request_out(db, updated)
 
 
