@@ -10,3 +10,5 @@ email-validator==2.2.0
 python-dotenv==1.0.0
 psycopg2-binary==2.9.9
 flask-jwt-extended==4.4.4
+Pillow==10.4.0
+pillow-heif==0.18.0

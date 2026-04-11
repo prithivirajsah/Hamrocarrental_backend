@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -6,6 +7,29 @@ from sqlalchemy.orm import Session
 
 from models.kyc_document import KycDocument
 from models.user import User
+
+
+def _to_public_asset_url(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+
+    normalized = value.strip().replace("\\", "/")
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
+    if normalized.startswith("/"):
+        return normalized
+
+    marker = "static/uploads/"
+    marker_index = normalized.lower().find(marker)
+    if marker_index != -1:
+        suffix = normalized[marker_index + len("static/") :]
+        return f"/static/{suffix}"
+
+    if os.path.exists(normalized):
+        filename = os.path.basename(normalized)
+        return f"/static/uploads/kyc/{filename}"
+
+    return normalized
 
 
 def create_kyc_document(
@@ -112,8 +136,8 @@ def get_admin_kyc_documents(
             "user_email": getattr(user, "email", None),
             "document_type": doc.document_type,
             "document_number": doc.document_number,
-            "front_image_url": doc.front_image_url,
-            "back_image_url": doc.back_image_url,
+            "front_image_url": _to_public_asset_url(doc.front_image_url),
+            "back_image_url": _to_public_asset_url(doc.back_image_url),
             "verification_status": doc.verification_status,
             "rejection_reason": doc.rejection_reason,
             "reviewed_at": doc.reviewed_at,

@@ -2,9 +2,12 @@
 
 import os
 import uuid
+from io import BytesIO
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from PIL import Image
+from pillow_heif import register_heif_opener
 from sqlalchemy.orm import Session
 
 from database_connection import get_db
@@ -52,6 +55,44 @@ ALLOWED_KYC_TYPES = {
     "image/heif",
 }
 
+HEIF_CONTENT_TYPES = {"image/heic", "image/heif"}
+
+register_heif_opener()
+
+
+def _normalize_upload_image(file: UploadFile, data: bytes) -> Dict[str, Any]:
+    original_name = file.filename or "document"
+    extension = os.path.splitext(original_name)[1].lower()
+    is_heif_upload = file.content_type in HEIF_CONTENT_TYPES or extension in {".heic", ".heif"}
+
+    if not is_heif_upload:
+        return {
+            "data": data,
+            "extension": extension or ".jpg",
+            "content_type": file.content_type or "application/octet-stream",
+            "filename": original_name,
+        }
+
+    try:
+        image = Image.open(BytesIO(data))
+        converted = image.convert("RGB")
+        buffer = BytesIO()
+        converted.save(buffer, format="JPEG", quality=92)
+        converted_data = buffer.getvalue()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to process HEIC/HEIF image. Please upload JPEG, PNG, or WEBP.",
+        )
+
+    stem = os.path.splitext(original_name)[0] or "document"
+    return {
+        "data": converted_data,
+        "extension": ".jpg",
+        "content_type": "image/jpeg",
+        "filename": f"{stem}.jpg",
+    }
+
 
 async def _save_kyc_file(file: UploadFile) -> Dict[str, Any]:
     if file.content_type not in ALLOWED_KYC_TYPES:
@@ -60,19 +101,22 @@ async def _save_kyc_file(file: UploadFile) -> Dict[str, Any]:
             detail=f"Unsupported document type: {file.content_type}",
         )
 
-    extension = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    raw_data = await file.read()
+    normalized = _normalize_upload_image(file, raw_data)
+
+    extension = normalized["extension"]
     file_name = f"{uuid.uuid4().hex}{extension}"
     file_path = os.path.join(KYC_UPLOAD_DIR, file_name)
 
-    data = await file.read()
+    data = normalized["data"]
     with open(file_path, "wb") as output:
         output.write(data)
 
     return {
         "url": f"/static/uploads/kyc/{file_name}",
         "data": data,
-        "content_type": file.content_type,
-        "filename": file.filename or file_name,
+        "content_type": normalized["content_type"],
+        "filename": normalized["filename"],
     }
 
 
