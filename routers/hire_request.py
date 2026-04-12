@@ -1,11 +1,11 @@
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
-from auth.jwt import get_current_user, get_current_admin
+from auth.jwt import get_current_user, is_admin_user
 from crud.hire_request import (
     create_hire_request,
     get_hire_request_by_id,
@@ -29,6 +29,14 @@ from utils.email_service import (
 )
 
 router = APIRouter(prefix="/hire-requests", tags=["Hire Requests"])
+
+
+def _require_owner_or_admin(hire_request, current_user) -> bool:
+    if hire_request.owner_id == current_user.id:
+        return True
+    if is_admin_user(current_user):
+        return True
+    return False
 
 
 def _to_hire_request_out(db: Session, hire_request) -> HireRequestOut:
@@ -109,7 +117,7 @@ def list_hire_requests(
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
 
-    if current_user.role == "admin":
+    if is_admin_user(current_user):
         records = get_hire_requests(db, skip=safe_skip, limit=safe_limit)
     else:
         records = get_hire_requests_by_requester(db, requester_id=current_user.id, skip=safe_skip, limit=safe_limit)
@@ -155,7 +163,7 @@ def get_hire_request_details(
 
     is_requester = hire_request.requester_id == current_user.id
     is_owner = hire_request.owner_id == current_user.id
-    is_admin = current_user.role == "admin"
+    is_admin = is_admin_user(current_user)
     if not (is_requester or is_owner or is_admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this request")
 
@@ -168,7 +176,7 @@ def change_hire_request_status(
     payload: HireRequestStatusUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin),
+    current_user=Depends(get_current_user),
 ):
     hire_request = get_hire_request_by_id(db, hire_request_id)
     if not hire_request:
@@ -178,16 +186,63 @@ def change_hire_request_status(
     if normalized == "rejected" and not (payload.rejection_reason or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rejection_reason is required when rejecting")
 
+    is_admin = is_admin_user(current_user)
+    is_owner = hire_request.owner_id == current_user.id
+    is_requester = hire_request.requester_id == current_user.id
+
+    if not (is_admin or is_owner or is_requester):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to update this request")
+
+    if is_owner and normalized not in {"approved", "rejected", "cancelled"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owners can only approve, reject, or cancel requests")
+
+    if is_requester and normalized != "cancelled":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requesters can only cancel their own requests")
+
     updated = update_hire_request_status(
         db,
         hire_request=hire_request,
         status=normalized,
-        admin_id=current_admin.id,
+        admin_id=current_user.id if is_admin else None,
         rejection_reason=payload.rejection_reason,
     )
     requester = get_user_by_id(db, updated.requester_id)
     owner = get_user_by_id(db, updated.owner_id)
     background_tasks.add_task(send_hire_request_status_updated_email, requester, owner, updated, normalized, payload.rejection_reason)
+    return _to_hire_request_out(db, updated)
+
+
+@router.patch("/{hire_request_id}/accept", response_model=HireRequestOut, status_code=status.HTTP_200_OK)
+def accept_hire_request(
+    hire_request_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    hire_request = get_hire_request_by_id(db, hire_request_id)
+    if not hire_request:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hire request not found")
+
+    if not _require_owner_or_admin(hire_request, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned driver/owner can accept this request")
+
+    if hire_request.status == "approved":
+        return _to_hire_request_out(db, hire_request)
+
+    if hire_request.status != "pending":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending requests can be accepted")
+
+    updated = update_hire_request_status(
+        db,
+        hire_request=hire_request,
+        status="approved",
+        admin_id=current_user.id if is_admin_user(current_user) else None,
+        rejection_reason=None,
+    )
+
+    requester = get_user_by_id(db, updated.requester_id)
+    owner = get_user_by_id(db, updated.owner_id)
+    background_tasks.add_task(send_hire_request_status_updated_email, requester, owner, updated, "approved", None)
     return _to_hire_request_out(db, updated)
 
 

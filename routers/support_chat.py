@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth.jwt import get_current_user
+from auth.jwt import get_current_user, is_admin_user
 from crud.support_chat import (
     create_support_conversation,
     create_support_message,
@@ -38,7 +38,7 @@ def _ensure_normal_user(current_user):
 
 
 def _ensure_admin(current_user):
-    if current_user.role != "admin":
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
@@ -78,7 +78,7 @@ def _to_conversation_summary_out(db: Session, conversation) -> SupportConversati
 
 
 def _ensure_conversation_access(conversation, current_user):
-    if current_user.role == "admin":
+    if is_admin_user(current_user):
         return
 
     if conversation.user_id != current_user.id:
@@ -136,6 +136,72 @@ def list_admin_support_conversations(
     _ensure_admin(current_user)
     conversations = get_admin_support_conversations(db)
     return [_to_conversation_summary_out(db, item) for item in conversations]
+
+
+@router.get(
+    "/admin/conversations/{conversation_id}/messages",
+    response_model=list[SupportMessageOut],
+    status_code=status.HTTP_200_OK,
+)
+def list_admin_support_messages(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    _ensure_admin(current_user)
+
+    conversation = get_support_conversation_by_id(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    messages = get_support_messages(db, conversation_id)
+    return [_to_message_out(db, item) for item in messages]
+
+
+@router.post(
+    "/admin/conversations/{conversation_id}/messages",
+    response_model=SupportMessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_admin_support_message(
+    conversation_id: int,
+    payload: SupportMessageCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    _ensure_admin(current_user)
+
+    conversation = get_support_conversation_by_id(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    support_message = create_support_message(
+        db,
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        message=payload.message,
+    )
+    return _to_message_out(db, support_message)
+
+
+@router.patch(
+    "/admin/conversations/{conversation_id}/read",
+    response_model=SupportReadReceiptOut,
+    status_code=status.HTTP_200_OK,
+)
+def mark_admin_support_messages_as_read(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    _ensure_admin(current_user)
+
+    conversation = get_support_conversation_by_id(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    marked_count = mark_conversation_as_read_for_user(db, conversation_id, current_user.id)
+    return SupportReadReceiptOut(conversation_id=conversation_id, marked_count=marked_count)
 
 
 @router.get(

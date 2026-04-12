@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth.jwt import get_current_user
+from auth.jwt import get_current_user, is_admin_user
 from crud.booking import has_user_booking_for_post
 from crud.post import get_post_by_id
 from crud.review import (
@@ -183,7 +183,7 @@ def remove_review(
             detail="Review not found",
         )
 
-    if review.user_id != current_user.id and current_user.role != "admin":
+    if review.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only delete your own review",

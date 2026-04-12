@@ -21,7 +21,7 @@ from crud.user import (
     update_user_profile,
     update_user_role
 )
-from auth.jwt import get_current_user
+from auth.jwt import get_current_user, is_admin_user
 from crud.driver_license import create_driver_license, get_driver_license_by_user_id
 from crud.kyc import create_kyc_document, get_latest_user_kyc_document
 from pydantic import BaseModel
@@ -181,7 +181,7 @@ def get_users_by_role_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    if current_user.role != "admin":
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can view users by role",
@@ -208,7 +208,7 @@ def get_role_statistics(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    if current_user.role != "admin":
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can view statistics",
@@ -227,7 +227,7 @@ def update_user_role_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    if current_user.role != "admin":
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can update roles",

@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth.jwt import get_current_user
+from auth.jwt import get_current_user, is_admin_user
 from crud.chat import (
     create_chat_message,
     get_active_hire_requests_for_user,
@@ -72,10 +72,10 @@ def list_chat_messages(
     if not hire_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hire request not found")
 
-    if current_user.id not in {hire_request.requester_id, hire_request.owner_id} and current_user.role != "admin":
+    if current_user.id not in {hire_request.requester_id, hire_request.owner_id} and not is_admin_user(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this chat")
 
-    if hire_request.status != "approved" and current_user.role != "admin":
+    if hire_request.status != "approved" and not is_admin_user(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chat is available after the hire request is approved")
 
     messages = get_chat_messages_for_hire_request(db, hire_request_id)

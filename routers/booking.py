@@ -4,7 +4,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from auth.jwt import get_current_user
+from auth.jwt import get_current_user, is_admin_user
 from crud.booking import (
     create_booking,
     get_existing_user_booking_for_range,
@@ -169,7 +169,7 @@ def list_bookings(
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
 
-    if current_user.role == "admin":
+    if is_admin_user(current_user):
         records = get_bookings(db, skip=safe_skip, limit=safe_limit)
     else:
         records = get_bookings_by_user(db, user_id=current_user.id, skip=safe_skip, limit=safe_limit)
@@ -269,7 +269,7 @@ def get_booking_details(
 
     is_owner = booking.owner_id == current_user.id
     is_renter = booking.user_id == current_user.id
-    is_admin = current_user.role == "admin"
+    is_admin = is_admin_user(current_user)
     if not (is_owner or is_renter or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -287,7 +287,7 @@ def change_booking_status(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    if current_user.role != "admin":
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can update booking status",
@@ -323,7 +323,7 @@ def cancel_booking(
         )
 
     is_renter = booking.user_id == current_user.id
-    is_admin = current_user.role == "admin"
+    is_admin = is_admin_user(current_user)
     if not (is_renter or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
