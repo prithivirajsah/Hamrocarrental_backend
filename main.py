@@ -20,10 +20,13 @@ from models.driver_license import DriverLicense  # noqa: F401
 from models.kyc_document import KycDocument  # noqa: F401
 from models.hire_request import HireRequest  # noqa: F401
 from models.hire_request_message import HireRequestMessage  # noqa: F401
+from models.support_conversation import SupportConversation  # noqa: F401
+from models.support_message import SupportMessage  # noqa: F401
 from routers.auth import router as auth_router
 from routers.booking import router as booking_router
 from routers.contact import router as contact_router
 from routers.chat import router as chat_router
+from routers.support_chat import router as support_chat_router
 from routers.hire_request import router as hire_request_router
 from routers.post import router as post_router
 from routers.user import router as user_router
@@ -404,6 +407,7 @@ app.include_router(auth_router)
 app.include_router(contact_router)
 app.include_router(post_router)
 app.include_router(chat_router)
+app.include_router(support_chat_router)
 app.include_router(hire_request_router)
 app.include_router(booking_router)
 app.include_router(user_router)

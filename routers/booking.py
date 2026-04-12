@@ -16,6 +16,7 @@ from crud.booking import (
     has_booking_overlap_with_other_users,
     has_booking_overlap,
     update_booking_status,
+    get_bookings_count_by_user,
 )
 from crud.post import get_post_by_id
 from crud.user import get_user_by_id
@@ -31,6 +32,7 @@ from schemas.booking import (
     BookingCreateResponse,
     BookingOut,
     BookingStatusUpdate,
+    BookingSummary,
 )
 
 
@@ -175,16 +177,33 @@ def list_bookings(
     return [_to_booking_out(db, booking) for booking in records]
 
 
+@router.get("/me/summary", response_model=BookingSummary, status_code=status.HTTP_200_OK)
+def get_my_bookings_summary(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get booking statistics/counts by status for current user."""
+    stats = get_bookings_count_by_user(db, user_id=current_user.id)
+    return BookingSummary(**stats)
+
+
 @router.get("/me", response_model=List[BookingOut], status_code=status.HTTP_200_OK)
 def list_my_bookings(
     skip: int = 0,
     limit: int = 50,
+    status_filter: str = Query(None, regex="^(pending|confirmed|active|completed|cancelled)$"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
-    records = get_bookings_by_user(db, user_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    records = get_bookings_by_user(
+        db,
+        user_id=current_user.id,
+        skip=safe_skip,
+        limit=safe_limit,
+        status=status_filter,
+    )
     return [_to_booking_out(db, booking) for booking in records]
 
 

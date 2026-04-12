@@ -55,10 +55,12 @@ def get_bookings(db: Session, skip: int = 0, limit: int = 50) -> list[Booking]:
     )
 
 
-def get_bookings_by_user(db: Session, user_id: int, skip: int = 0, limit: int = 50) -> list[Booking]:
+def get_bookings_by_user(db: Session, user_id: int, skip: int = 0, limit: int = 50, status: str = None) -> list[Booking]:
+    query = db.query(Booking).filter(Booking.user_id == user_id, Booking.post_id.isnot(None))
+    if status:
+        query = query.filter(Booking.status == status)
     return (
-        db.query(Booking)
-        .filter(Booking.user_id == user_id, Booking.post_id.isnot(None))
+        query
         .order_by(Booking.created_at.desc(), Booking.id.desc())
         .offset(skip)
         .limit(limit)
@@ -178,3 +180,21 @@ def update_booking_status(db: Session, booking: Booking, status: str) -> Booking
     db.commit()
     db.refresh(booking)
     return booking
+
+
+def get_bookings_count_by_user(db: Session, user_id: int) -> dict:
+    """Get booking counts by status for a specific user."""
+    all_bookings = (
+        db.query(Booking)
+        .filter(Booking.user_id == user_id, Booking.post_id.isnot(None))
+        .all()
+    )
+    
+    return {
+        "total": len(all_bookings),
+        "pending": sum(1 for b in all_bookings if b.status == "pending"),
+        "confirmed": sum(1 for b in all_bookings if b.status == "confirmed"),
+        "active": sum(1 for b in all_bookings if b.status == "active"),
+        "completed": sum(1 for b in all_bookings if b.status == "completed"),
+        "cancelled": sum(1 for b in all_bookings if b.status == "cancelled"),
+    }

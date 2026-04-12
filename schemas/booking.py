@@ -82,3 +82,12 @@ class BookingAvailabilityResponse(BaseModel):
     start_date: date
     end_date: date
     available: bool
+
+
+class BookingSummary(BaseModel):
+    total: int
+    pending: int
+    confirmed: int
+    active: int
+    completed: int
+    cancelled: int
