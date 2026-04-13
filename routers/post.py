@@ -144,49 +144,6 @@ def _extract_features(data: Dict[str, Any]) -> List[str]:
     return collected
 
 
-def _normalize_string_list(value: Any) -> List[str]:
-    if value is None:
-        return []
-
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-
-    if isinstance(value, tuple):
-        return [str(item).strip() for item in value if str(item).strip()]
-
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        if raw.startswith("["):
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    return [str(item).strip() for item in parsed if str(item).strip()]
-            except json.JSONDecodeError:
-                return []
-        return [raw]
-
-    # Legacy/bad rows may contain JSON objects instead of arrays.
-    return []
-
-
-def _to_post_out(post) -> PostOut:
-    return PostOut(
-        id=post.id,
-        owner_id=post.owner_id,
-        post_title=post.post_title,
-        category=(post.category or "sedan"),
-        price_per_day=post.price_per_day,
-        location=post.location,
-        contact_number=post.contact_number,
-        description=post.description,
-        features=_normalize_string_list(getattr(post, "features", None)),
-        image_urls=_normalize_string_list(getattr(post, "image_urls", None)),
-        created_at=post.created_at,
-    )
-
-
 async def _build_payload_from_request(request: Request) -> PostCreate:
     content_type = request.headers.get("content-type", "").lower()
 
@@ -283,8 +240,7 @@ def list_posts(
 ):
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
-    posts = get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
-    return [_to_post_out(post) for post in posts]
+    return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
 
 
 @router.get("/categories", status_code=status.HTTP_200_OK)
@@ -305,17 +261,15 @@ def list_my_posts(
 
     # Backward compatibility for clients that call /posts/me before login.
     if current_user is None:
-        posts = get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
-        return [_to_post_out(post) for post in posts]
+        return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
 
-    posts = get_posts_by_owner(
+    return get_posts_by_owner(
         db,
         owner_id=current_user.id,
         skip=safe_skip,
         limit=safe_limit,
         category=category,
     )
-    return [_to_post_out(post) for post in posts]
 
 
 @router.get("/{post_id}", response_model=PostOut, status_code=status.HTTP_200_OK)
@@ -326,7 +280,7 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Post not found",
         )
-    return _to_post_out(post)
+    return post
 
 
 async def _build_update_payload_from_request(request: Request) -> tuple[PostCreate, list[str]]:
