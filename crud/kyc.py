@@ -97,6 +97,18 @@ def get_latest_user_kyc_document(db: Session, user_id: int):
     )
 
 
+def get_user_approved_kyc_document(db: Session, user_id: int):
+    return (
+        db.query(KycDocument)
+        .filter(
+            KycDocument.user_id == user_id,
+            KycDocument.verification_status == "approved",
+        )
+        .order_by(KycDocument.reviewed_at.desc(), KycDocument.created_at.desc(), KycDocument.id.desc())
+        .first()
+    )
+
+
 def get_admin_kyc_documents(
     db: Session,
     skip: int = 0,
