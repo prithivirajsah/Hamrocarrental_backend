@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -41,6 +42,11 @@ def create_chat_message(
         message=message,
     )
     db.add(chat_message)
+
+    hire_request = db.query(HireRequest).filter(HireRequest.id == hire_request_id).first()
+    if hire_request:
+        hire_request.updated_at = datetime.utcnow()
+
     db.commit()
     db.refresh(chat_message)
     return chat_message

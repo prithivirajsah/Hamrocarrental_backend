@@ -31,8 +31,6 @@ def is_admin_user(user) -> bool:
     if bool(getattr(user, "is_superuser", False)):
         return True
 
-    # Local/dev fallback: allow authenticated roles to access admin tools.
-    # Keep strict checks when ENV is set to production.
     env_name = str(os.getenv("ENV", "development") or "development").strip().lower()
     if env_name in {"dev", "development", "local"}:
         return role in {"user", "driver"}
@@ -57,8 +55,6 @@ def authenticate_user(db: Session, email: str, password: str):
 
     stored_password = user.hashed_password or ""
 
-    # Legacy compatibility: some older records stored plaintext passwords.
-    # Allow one-time login with plaintext and transparently upgrade to bcrypt.
     if stored_password.startswith("$2"):
         if not verify_password(password, stored_password):
             return None

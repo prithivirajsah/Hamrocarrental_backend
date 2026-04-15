@@ -39,8 +39,17 @@ def _to_active_chat_out(db: Session, hire_request) -> ActiveChatOut:
     latest_message = get_latest_chat_message(db, hire_request.id)
 
     return ActiveChatOut(
+        id=hire_request.id,
         hire_request_id=hire_request.id,
+        post_id=hire_request.post_id,
+        status=hire_request.status,
         hire_request_status=hire_request.status,
+        pickup_location=hire_request.pickup_location,
+        return_location=hire_request.return_location,
+        start_date=hire_request.start_date,
+        end_date=hire_request.end_date,
+        requested_price=hire_request.requested_price,
+        note=hire_request.note,
         requester_id=hire_request.requester_id,
         requester_name=getattr(requester, "full_name", None),
         requester_email=getattr(requester, "email", None),
@@ -49,6 +58,7 @@ def _to_active_chat_out(db: Session, hire_request) -> ActiveChatOut:
         owner_email=getattr(owner, "email", None),
         vehicle_name=getattr(post, "post_title", None),
         last_message=_to_chat_message_out(db, latest_message) if latest_message else None,
+        created_at=hire_request.created_at,
         updated_at=hire_request.updated_at,
     )
 

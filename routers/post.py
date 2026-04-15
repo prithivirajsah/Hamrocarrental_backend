@@ -36,6 +36,27 @@ POST_CATEGORIES = [
 ]
 
 
+def _to_absolute_asset_url(request: Request, url: str) -> str:
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return cleaned
+    if cleaned.startswith("http://") or cleaned.startswith("https://"):
+        return cleaned
+    if not cleaned.startswith("/"):
+        cleaned = f"/{cleaned}"
+    return str(request.base_url).rstrip("/") + cleaned
+
+
+def _serialize_post_with_absolute_images(post: Any, request: Request) -> Dict[str, Any]:
+    payload = PostOut.model_validate(post, from_attributes=True).model_dump()
+    payload["image_urls"] = [
+        _to_absolute_asset_url(request, image_url)
+        for image_url in (payload.get("image_urls") or [])
+        if str(image_url).strip()
+    ]
+    return payload
+
+
 def _is_uploaded_file(value: Any) -> bool:
     return isinstance(value, (UploadFile, StarletteUploadFile))
 
@@ -227,12 +248,13 @@ async def add_post(
     post = create_post(db, owner_id=current_user.id, payload=payload)
     return {
         "message": "Post created successfully.",
-        "post": post,
+        "post": _serialize_post_with_absolute_images(post, request),
     }
 
 
 @router.get("", response_model=List[PostOut], status_code=status.HTTP_200_OK)
 def list_posts(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
     category: Optional[str] = None,
@@ -240,7 +262,8 @@ def list_posts(
 ):
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
-    return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
+    posts = get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
+    return [_serialize_post_with_absolute_images(post, request) for post in posts]
 
 
 @router.get("/categories", status_code=status.HTTP_200_OK)
@@ -250,6 +273,7 @@ def list_post_categories():
 
 @router.get("/me", response_model=List[PostOut], status_code=status.HTTP_200_OK)
 def list_my_posts(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
     category: Optional[str] = None,
@@ -261,26 +285,28 @@ def list_my_posts(
 
     # Backward compatibility for clients that call /posts/me before login.
     if current_user is None:
-        return get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
+        posts = get_posts(db, skip=safe_skip, limit=safe_limit, category=category)
+        return [_serialize_post_with_absolute_images(post, request) for post in posts]
 
-    return get_posts_by_owner(
+    posts = get_posts_by_owner(
         db,
         owner_id=current_user.id,
         skip=safe_skip,
         limit=safe_limit,
         category=category,
     )
+    return [_serialize_post_with_absolute_images(post, request) for post in posts]
 
 
 @router.get("/{post_id}", response_model=PostOut, status_code=status.HTTP_200_OK)
-def get_post(post_id: int, db: Session = Depends(get_db)):
+def get_post(post_id: int, request: Request, db: Session = Depends(get_db)):
     post = get_post_by_id(db, post_id=post_id)
     if not post:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Post not found",
         )
-    return post
+    return _serialize_post_with_absolute_images(post, request)
 
 
 async def _build_update_payload_from_request(request: Request) -> tuple[PostCreate, list[str]]:
@@ -402,7 +428,7 @@ async def update_post_endpoint(
         )
     return {
         "message": "Post updated successfully.",
-        "post": post,
+        "post": _serialize_post_with_absolute_images(post, request),
     }
 
 

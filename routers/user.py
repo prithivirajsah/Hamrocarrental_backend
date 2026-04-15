@@ -5,7 +5,7 @@ import uuid
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from PIL import Image
 from pillow_heif import register_heif_opener
 from sqlalchemy.orm import Session
@@ -19,11 +19,12 @@ from crud.user import (
     get_all_drivers,
     count_users_by_role,
     update_user_profile,
-    update_user_role
+    update_user_role,
+    update_user_profile_image,
 )
 from auth.jwt import get_current_user, is_admin_user
 from crud.driver_license import create_driver_license, get_driver_license_by_user_id
-from crud.kyc import create_kyc_document, get_latest_user_kyc_document
+from crud.kyc import create_kyc_document, get_latest_user_kyc_document, get_user_approved_kyc_document
 from pydantic import BaseModel
 
 
@@ -45,8 +46,19 @@ class DriverLicenseUpload(BaseModel):
 router = APIRouter(prefix="/users", tags=["Users"])
 
 KYC_UPLOAD_DIR = "static/uploads/kyc"
+PROFILE_UPLOAD_DIR = "static/uploads/profiles"
 os.makedirs(KYC_UPLOAD_DIR, exist_ok=True)
+os.makedirs(PROFILE_UPLOAD_DIR, exist_ok=True)
 ALLOWED_KYC_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+
+ALLOWED_PROFILE_TYPES = {
     "image/jpeg",
     "image/jpg",
     "image/png",
@@ -58,6 +70,24 @@ ALLOWED_KYC_TYPES = {
 HEIF_CONTENT_TYPES = {"image/heic", "image/heif"}
 
 register_heif_opener()
+
+
+def _driver_license_public_url() -> str:
+    # Keep a stable URL so clients do not depend on storage filenames.
+    return "/users/driver/license/image"
+
+
+def _to_public_upload_path(url_value: Optional[str]) -> Optional[str]:
+    if not url_value:
+        return None
+
+    normalized = url_value.strip().replace("\\", "/")
+    marker = "static/uploads/"
+    index = normalized.lower().find(marker)
+    if index == -1:
+        return None
+
+    return normalized[index:]
 
 
 def _normalize_upload_image(file: UploadFile, data: bytes) -> Dict[str, Any]:
@@ -120,6 +150,30 @@ async def _save_kyc_file(file: UploadFile) -> Dict[str, Any]:
     }
 
 
+async def _save_profile_photo_file(file: UploadFile) -> Dict[str, Any]:
+    if file.content_type not in ALLOWED_PROFILE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported profile photo type: {file.content_type}",
+        )
+
+    raw_data = await file.read()
+    normalized = _normalize_upload_image(file, raw_data)
+
+    extension = normalized["extension"]
+    file_name = f"{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(PROFILE_UPLOAD_DIR, file_name)
+
+    data = normalized["data"]
+    with open(file_path, "wb") as output:
+        output.write(data)
+
+    return {
+        "url": f"/static/uploads/profiles/{file_name}",
+        "path": file_path,
+    }
+
+
 # Role-based feature lists
 def get_role_features(role: str):
     features = {
@@ -155,6 +209,41 @@ def update_current_user(
     current_user=Depends(get_current_user),
 ):
     return update_user_profile(db, current_user, payload)
+
+
+@router.post("/me/profile-photo", response_model=UserOut, status_code=status.HTTP_200_OK)
+async def upload_profile_photo(
+    profile_photo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not profile_photo:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="profile_photo is required",
+        )
+
+    saved_photo = await _save_profile_photo_file(profile_photo)
+    previous_image_url = current_user.profile_image_url
+
+    try:
+        updated_user = update_user_profile_image(db, current_user, saved_photo["url"])
+    except Exception:
+        try:
+            os.remove(saved_photo["path"])
+        except OSError:
+            pass
+        raise
+
+    if previous_image_url and previous_image_url.startswith("/static/uploads/profiles/"):
+        previous_path = previous_image_url.lstrip("/")
+        if previous_path != saved_photo["path"] and os.path.exists(previous_path):
+            try:
+                os.remove(previous_path)
+            except OSError:
+                pass
+
+    return updated_user
 
 # Home Page for logged-in users
 @router.get("/home")
@@ -275,7 +364,7 @@ def upload_driver_license(
         "id": license.id,
         "user_id": license.user_id,
         "license_number": license.license_number,
-        "license_image_url": license.license_image_url,
+        "license_image_url": _driver_license_public_url(),
         "license_expiry_date": license.license_expiry_date,
         "verification_status": license.verification_status,
         "created_at": license.created_at,
@@ -305,13 +394,60 @@ def get_my_driver_license(
         "id": license.id,
         "user_id": license.user_id,
         "license_number": license.license_number,
-        "license_image_url": license.license_image_url,
+        "license_image_url": _driver_license_public_url(),
         "license_expiry_date": license.license_expiry_date,
         "verification_status": license.verification_status,
         "rejection_reason": license.rejection_reason,
         "verified_at": license.verified_at,
         "created_at": license.created_at,
     }
+
+
+@router.get("/driver/license/image", include_in_schema=False)
+def get_my_driver_license_image(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Serve the current driver's uploaded license image/document."""
+    if current_user.role != "driver":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only drivers can view their license",
+        )
+
+    license_row = get_driver_license_by_user_id(db, current_user.id)
+    if not license_row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No license found. Please upload your license for verification.",
+        )
+
+    if license_row.license_image_data:
+        return Response(
+            content=license_row.license_image_data,
+            media_type=license_row.license_image_content_type or "application/octet-stream",
+        )
+
+    path_from_url = _to_public_upload_path(license_row.license_image_url)
+    if path_from_url and os.path.isfile(path_from_url):
+        with open(path_from_url, "rb") as input_file:
+            raw_data = input_file.read()
+
+        guessed_type = license_row.license_image_content_type
+        if not guessed_type:
+            ext = os.path.splitext(path_from_url)[1].lower()
+            if ext == ".pdf":
+                guessed_type = "application/pdf"
+            elif ext in {".jpg", ".jpeg"}:
+                guessed_type = "image/jpeg"
+            elif ext == ".png":
+                guessed_type = "image/png"
+            elif ext == ".webp":
+                guessed_type = "image/webp"
+
+        return Response(content=raw_data, media_type=guessed_type or "application/octet-stream")
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License image not found")
 
 
 @router.post("/kyc-documents", status_code=status.HTTP_201_CREATED)
@@ -388,3 +524,44 @@ def get_my_kyc_document_alias(
     current_user=Depends(get_current_user),
 ):
     return get_my_kyc_document(db=db, current_user=current_user)
+
+
+@router.get("/me/verification")
+def get_my_verification_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Unified profile verification endpoint for frontend consumption."""
+    approved_kyc = get_user_approved_kyc_document(db, current_user.id)
+    latest_kyc = approved_kyc or get_latest_user_kyc_document(db, current_user.id)
+    license_row = get_driver_license_by_user_id(db, current_user.id)
+
+    kyc_status = latest_kyc.verification_status if latest_kyc else "not_submitted"
+    kyc_can_upload = kyc_status != "approved"
+
+    if license_row:
+        license_status = license_row.verification_status
+        license_document_url = _driver_license_public_url()
+    else:
+        license_status = "not_submitted"
+        license_document_url = None
+
+    return {
+        "user": UserOut.model_validate(current_user),
+        "kyc": {
+            "status": kyc_status,
+            "can_upload": kyc_can_upload,
+            "is_verified": kyc_status == "approved",
+            "document_id": latest_kyc.id if latest_kyc else None,
+            "reviewed_at": latest_kyc.reviewed_at if latest_kyc else None,
+            "rejection_reason": latest_kyc.rejection_reason if latest_kyc else None,
+        },
+        "driver_license": {
+            "status": license_status,
+            "is_verified": license_status == "verified",
+            "document_url": license_document_url,
+            "license_id": license_row.id if license_row else None,
+            "verified_at": license_row.verified_at if license_row else None,
+            "rejection_reason": license_row.rejection_reason if license_row else None,
+        },
+    }
