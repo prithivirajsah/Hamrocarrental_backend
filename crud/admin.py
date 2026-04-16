@@ -105,6 +105,7 @@ def get_admin_posts(
             "description": post.description,
             "features": post.features or [],
             "image_urls": post.image_urls or [],
+            "status": post.status or "available",
             "created_at": post.created_at,
         }
         for post, owner in rows

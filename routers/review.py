@@ -4,16 +4,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth.jwt import get_current_user, is_admin_user
-from crud.booking import has_user_booking_for_post
+from crud.booking import get_booking_by_id, has_user_booking_for_post
 from crud.post import get_post_by_id
 from crud.review import (
+    create_driver_review,
     create_review,
     delete_review,
+    get_driver_review_summary,
+    get_driver_reviews,
     get_review_by_id,
     get_reviews,
     get_reviews_by_post,
     get_reviews_by_user,
     get_review_reminders_for_user,
+    has_user_review_for_driver_booking,
     has_user_review_for_post,
     update_review,
     update_review_likes,
@@ -21,6 +25,10 @@ from crud.review import (
 from crud.user import get_user_by_id
 from database_connection import get_db
 from schemas.review import (
+    DriverReviewCreate,
+    DriverReviewCreateResponse,
+    DriverReviewOut,
+    DriverReviewSummaryOut,
     ReviewCreate,
     ReviewCreateResponse,
     ReviewLikeUpdate,
@@ -48,6 +56,30 @@ def _to_review_out(db: Session, review) -> ReviewOut:
         updated_at=review.updated_at,
         user_name=getattr(renter, "full_name", None),
         role="Verified Renter",
+        vehicle_name=getattr(post, "post_title", None),
+    )
+
+
+def _to_driver_review_out(db: Session, review) -> DriverReviewOut:
+    reviewer = get_user_by_id(db, review.user_id)
+    driver = get_user_by_id(db, review.driver_id)
+    post = get_post_by_id(db, review.post_id)
+
+    return DriverReviewOut(
+        id=review.id,
+        booking_id=review.booking_id,
+        post_id=review.post_id,
+        driver_id=review.driver_id,
+        reviewer_id=review.user_id,
+        rating=review.rating,
+        content=review.content,
+        likes=review.likes,
+        created_at=review.created_at,
+        updated_at=review.updated_at,
+        reviewer_name=getattr(reviewer, "full_name", None),
+        reviewer_email=getattr(reviewer, "email", None),
+        driver_name=getattr(driver, "full_name", None),
+        driver_email=getattr(driver, "email", None),
         vehicle_name=getattr(post, "post_title", None),
     )
 
@@ -82,6 +114,99 @@ def add_review(
         "message": "Review submitted successfully.",
         "review": _to_review_out(db, review),
     }
+
+
+@router.post("/drivers", response_model=DriverReviewCreateResponse, status_code=status.HTTP_201_CREATED)
+def add_driver_review(
+    payload: DriverReviewCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    booking = get_booking_by_id(db, payload.booking_id)
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    if booking.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can review driver only for your own booking",
+        )
+
+    if booking.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Driver can be reviewed only after booking is completed",
+        )
+
+    if has_user_review_for_driver_booking(
+        db,
+        user_id=current_user.id,
+        booking_id=booking.id,
+        driver_id=booking.owner_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already submitted a driver review for this booking",
+        )
+
+    review = create_driver_review(
+        db,
+        user_id=current_user.id,
+        booking_id=booking.id,
+        post_id=booking.post_id,
+        driver_id=booking.owner_id,
+        rating=payload.rating,
+        content=payload.content,
+    )
+    return {
+        "message": "Driver review submitted successfully.",
+        "review": _to_driver_review_out(db, review),
+    }
+
+
+@router.get("/drivers/me/received", response_model=List[DriverReviewOut], status_code=status.HTTP_200_OK)
+def list_my_received_driver_reviews(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    records = get_driver_reviews(db, driver_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    return [_to_driver_review_out(db, review) for review in records]
+
+
+@router.get("/drivers/me/summary", response_model=DriverReviewSummaryOut, status_code=status.HTTP_200_OK)
+def my_driver_review_summary(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return get_driver_review_summary(db, driver_id=current_user.id)
+
+
+@router.get("/drivers/{driver_id}", response_model=List[DriverReviewOut], status_code=status.HTTP_200_OK)
+def list_driver_reviews(
+    driver_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    safe_skip = max(skip, 0)
+    safe_limit = min(max(limit, 1), 100)
+    records = get_driver_reviews(db, driver_id=driver_id, skip=safe_skip, limit=safe_limit)
+    return [_to_driver_review_out(db, review) for review in records]
+
+
+@router.get("/drivers/{driver_id}/summary", response_model=DriverReviewSummaryOut, status_code=status.HTTP_200_OK)
+def driver_review_summary(
+    driver_id: int,
+    db: Session = Depends(get_db),
+):
+    return get_driver_review_summary(db, driver_id=driver_id)
 
 
 @router.get("", response_model=List[ReviewOut], status_code=status.HTTP_200_OK)

@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 from auth.jwt import get_current_user, is_admin_user
 from crud.hire_request import (
     create_hire_request,
+    get_hire_request_dashboard_stats_for_owner,
+    get_hire_requests_for_driver_queue,
     get_hire_request_by_id,
     get_hire_requests,
+    get_hire_requests_for_owner_identity,
     get_hire_requests_by_owner,
     get_hire_requests_by_requester,
     update_hire_request_status,
@@ -20,6 +23,7 @@ from database_connection import get_db
 from schemas.hire_request import (
     HireRequestCreate,
     HireRequestCreateResponse,
+    HireRequestOwnerDashboardStats,
     HireRequestOut,
     HireRequestStatusUpdate,
 )
@@ -147,8 +151,19 @@ def list_owner_hire_requests(
 ):
     safe_skip = max(skip, 0)
     safe_limit = min(max(limit, 1), 100)
-    records = get_hire_requests_by_owner(db, owner_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    if str(getattr(current_user, "role", "") or "").lower() == "driver":
+        records = get_hire_requests_for_driver_queue(db, driver_id=current_user.id, skip=safe_skip, limit=safe_limit)
+    else:
+        records = get_hire_requests_for_owner_identity(db, owner_id=current_user.id, skip=safe_skip, limit=safe_limit)
     return [_to_hire_request_out(db, hire_request) for hire_request in records]
+
+
+@router.get("/owner/me/stats", response_model=HireRequestOwnerDashboardStats, status_code=status.HTTP_200_OK)
+def get_owner_hire_request_stats(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return get_hire_request_dashboard_stats_for_owner(db, owner_id=current_user.id)
 
 
 @router.get("/{hire_request_id}", response_model=HireRequestOut, status_code=status.HTTP_200_OK)
@@ -223,20 +238,32 @@ def accept_hire_request(
     if not hire_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hire request not found")
 
-    if not _require_owner_or_admin(hire_request, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned driver/owner can accept this request")
+    is_admin = is_admin_user(current_user)
+    is_owner = hire_request.owner_id == current_user.id
+    is_driver = str(getattr(current_user, "role", "") or "").lower() == "driver"
+
+    # Driver queue behavior: any driver can claim a pending request.
+    if not (is_admin or is_owner or is_driver):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only drivers or admins can accept this request")
 
     if hire_request.status == "approved":
+        if not (is_admin or hire_request.owner_id == current_user.id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This request is already accepted by another driver")
         return _to_hire_request_out(db, hire_request)
 
     if hire_request.status != "pending":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending requests can be accepted")
 
+    if is_driver and not is_admin:
+        hire_request.owner_id = current_user.id
+        db.commit()
+        db.refresh(hire_request)
+
     updated = update_hire_request_status(
         db,
         hire_request=hire_request,
         status="approved",
-        admin_id=current_user.id if is_admin_user(current_user) else None,
+        admin_id=current_user.id if is_admin else None,
         rejection_reason=None,
     )
 

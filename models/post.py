@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, Float, JSON, ForeignKey, Enum
 from sqlalchemy.sql import func
 
 from database_connection import Base
@@ -17,4 +17,5 @@ class Post(Base):
     description = Column(Text, nullable=False)
     features = Column(JSON, nullable=False, default=list)
     image_urls = Column(JSON, nullable=False, default=list)
+    status = Column(Enum("available", "booked", "maintenance", name="post_status"), nullable=False, default="available", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

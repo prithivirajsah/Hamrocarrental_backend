@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models.hire_request import HireRequest
+from models.post import Post
 
 
 def create_hire_request(
@@ -70,6 +72,84 @@ def get_hire_requests_by_owner(db: Session, owner_id: int, skip: int = 0, limit:
         .limit(limit)
         .all()
     )
+
+
+def get_hire_requests_for_owner_identity(db: Session, owner_id: int, skip: int = 0, limit: int = 50) -> list[HireRequest]:
+    """Return requests owned by user, including legacy rows with stale owner_id.
+
+    Some legacy records can have owner_id out of sync with posts.owner_id.
+    We treat post ownership as a secondary source of truth.
+    """
+    return (
+        db.query(HireRequest)
+        .join(Post, Post.id == HireRequest.post_id)
+        .filter(
+            or_(
+                HireRequest.owner_id == owner_id,
+                Post.owner_id == owner_id,
+            )
+        )
+        .order_by(HireRequest.created_at.desc(), HireRequest.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_hire_requests_for_driver_queue(db: Session, driver_id: int, skip: int = 0, limit: int = 50) -> list[HireRequest]:
+    """Return requests visible to a driver.
+
+    Drivers should always see:
+    - their own requests (all statuses)
+    - globally pending requests so they can accept and take ownership
+    """
+    return (
+        db.query(HireRequest)
+        .join(Post, Post.id == HireRequest.post_id)
+        .filter(
+            or_(
+                HireRequest.owner_id == driver_id,
+                Post.owner_id == driver_id,
+                HireRequest.status == "pending",
+            )
+        )
+        .order_by(HireRequest.created_at.desc(), HireRequest.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_hire_request_dashboard_stats_for_owner(db: Session, owner_id: int) -> dict:
+    """Return hire-request stats for owner dashboard cards.
+
+    The stats include requests where ownership is identified either directly from
+    ``hire_requests.owner_id`` or indirectly via ``posts.owner_id`` for legacy rows.
+    """
+    base_query = (
+        db.query(HireRequest)
+        .join(Post, Post.id == HireRequest.post_id)
+        .filter(
+            or_(
+                HireRequest.owner_id == owner_id,
+                Post.owner_id == owner_id,
+            )
+        )
+    )
+
+    total_requests = base_query.with_entities(func.count(func.distinct(HireRequest.id))).scalar() or 0
+    pending_requests = (
+        base_query
+        .filter(HireRequest.status == "pending")
+        .with_entities(func.count(func.distinct(HireRequest.id)))
+        .scalar()
+        or 0
+    )
+
+    return {
+        "hire_requests": int(total_requests),
+        "pending_requests": int(pending_requests),
+    }
 
 
 def update_hire_request_status(

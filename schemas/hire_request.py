@@ -83,3 +83,8 @@ class HireRequestStatusUpdate(BaseModel):
     status: HireRequestStatus
     rejection_reason: Optional[str] = None
 
+
+class HireRequestOwnerDashboardStats(BaseModel):
+    hire_requests: int
+    pending_requests: int
+

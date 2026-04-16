@@ -57,6 +57,7 @@ class AdminPostListItem(BaseModel):
     description: str
     features: List[str]
     image_urls: List[str]
+    status: str = "available"
     created_at: datetime
 
 

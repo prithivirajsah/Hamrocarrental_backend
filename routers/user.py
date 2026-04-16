@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from PIL import Image
 from pillow_heif import register_heif_opener
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database_connection import get_db
@@ -25,6 +26,9 @@ from crud.user import (
 from auth.jwt import get_current_user, is_admin_user
 from crud.driver_license import create_driver_license, get_driver_license_by_user_id
 from crud.kyc import create_kyc_document, get_latest_user_kyc_document, get_user_approved_kyc_document
+from models.booking import Booking
+from models.hire_request import HireRequest
+from models.post import Post
 from pydantic import BaseModel
 
 
@@ -259,6 +263,73 @@ def home_page(current_user=Depends(get_current_user)):
             "support": "Get customer support",
         },
         "role_specific_features": get_role_features(current_user.role),
+    }
+
+
+@router.get("/driver/dashboard")
+@router.get("/dashboard/driver")
+def get_driver_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return card stats for the driver dashboard in one API call."""
+    user_id = current_user.id
+
+    my_cars = db.query(func.count(Post.id)).filter(Post.owner_id == user_id).scalar() or 0
+
+    active_bookings = (
+        db.query(func.count(Booking.id))
+        .filter(
+            Booking.owner_id == user_id,
+            Booking.post_id.isnot(None),
+            Booking.status == "confirmed",
+        )
+        .scalar()
+        or 0
+    )
+
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role == "driver":
+        visible_hire_filter = or_(
+            HireRequest.owner_id == user_id,
+            Post.owner_id == user_id,
+            HireRequest.status == "pending",
+        )
+    else:
+        visible_hire_filter = or_(
+            HireRequest.owner_id == user_id,
+            Post.owner_id == user_id,
+        )
+
+    hire_requests = (
+        db.query(func.count(func.distinct(HireRequest.id)))
+        .join(Post, Post.id == HireRequest.post_id)
+        .filter(visible_hire_filter)
+        .scalar()
+        or 0
+    )
+
+    pending_requests = (
+        db.query(func.count(func.distinct(HireRequest.id)))
+        .join(Post, Post.id == HireRequest.post_id)
+        .filter(
+            visible_hire_filter,
+            HireRequest.status == "pending",
+        )
+        .scalar()
+        or 0
+    )
+
+    # Include both snake_case and camelCase keys to avoid frontend mapping issues.
+    return {
+        "hire_requests": int(hire_requests),
+        "pending_requests": int(pending_requests),
+        "my_cars": int(my_cars),
+        "active_bookings": int(active_bookings),
+        "hireRequests": int(hire_requests),
+        "pendingRequests": int(pending_requests),
+        "myCars": int(my_cars),
+        "activeBookings": int(active_bookings),
     }
 
 # Admin: Get users by role

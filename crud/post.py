@@ -104,3 +104,14 @@ def delete_post(db: Session, post_id: int, owner_id: int, is_admin: bool = False
     db.delete(db_post)
     db.commit()
     return True
+
+
+def update_post_status(db: Session, post_id: int, new_status: str) -> Optional[Post]:
+    """Update vehicle status (admin only)"""
+    db_post = db.query(Post).filter(Post.id == post_id).first()
+    if not db_post:
+        return None
+    db_post.status = new_status
+    db.commit()
+    db.refresh(db_post)
+    return db_post

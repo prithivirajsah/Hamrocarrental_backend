@@ -24,11 +24,18 @@ def _to_chat_message_out(db: Session, chat_message) -> ChatMessageOut:
     return ChatMessageOut(
         id=chat_message.id,
         hire_request_id=chat_message.hire_request_id,
+        hireRequestId=chat_message.hire_request_id,
         sender_id=chat_message.sender_id,
+        senderId=chat_message.sender_id,
         sender_name=getattr(sender, "full_name", None),
+        senderName=getattr(sender, "full_name", None),
         sender_email=getattr(sender, "email", None),
+        senderEmail=getattr(sender, "email", None),
+        sender_role=getattr(sender, "role", None),
+        senderRole=getattr(sender, "role", None),
         message=chat_message.message,
         created_at=chat_message.created_at,
+        createdAt=chat_message.created_at,
     )
 
 

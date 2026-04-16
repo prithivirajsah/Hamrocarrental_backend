@@ -55,11 +55,25 @@ class PostOut(BaseModel):
     description: str
     features: List[str]
     image_urls: List[str]
+    status: str = "available"
     created_at: datetime
 
     model_config = {
         "from_attributes": True,
     }
+
+
+class PostStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        allowed = {"available", "booked", "maintenance"}
+        cleaned = (value or "").strip().lower()
+        if cleaned not in allowed:
+            raise ValueError(f"Status must be one of: {', '.join(allowed)}")
+        return cleaned
 
 
 class PostCreateResponse(BaseModel):

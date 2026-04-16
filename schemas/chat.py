@@ -21,11 +21,18 @@ class ChatMessageCreate(BaseModel):
 class ChatMessageOut(BaseModel):
     id: int
     hire_request_id: int
+    hireRequestId: Optional[int] = None
     sender_id: int
+    senderId: Optional[int] = None
     sender_name: Optional[str] = None
+    senderName: Optional[str] = None
     sender_email: Optional[str] = None
+    senderEmail: Optional[str] = None
+    sender_role: Optional[str] = None
+    senderRole: Optional[str] = None
     message: str
     created_at: datetime
+    createdAt: Optional[datetime] = None
 
     model_config = {
         "from_attributes": True,

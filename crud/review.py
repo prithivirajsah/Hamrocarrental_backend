@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.booking import Booking
@@ -29,6 +30,7 @@ def get_review_by_id(db: Session, review_id: int) -> Optional[Review]:
 def get_reviews(db: Session, skip: int = 0, limit: int = 50) -> list[Review]:
     return (
         db.query(Review)
+        .filter(Review.driver_id.is_(None))
         .order_by(Review.created_at.desc(), Review.id.desc())
         .offset(skip)
         .limit(limit)
@@ -39,7 +41,7 @@ def get_reviews(db: Session, skip: int = 0, limit: int = 50) -> list[Review]:
 def get_reviews_by_post(db: Session, post_id: int, skip: int = 0, limit: int = 50) -> list[Review]:
     return (
         db.query(Review)
-        .filter(Review.post_id == post_id)
+        .filter(Review.post_id == post_id, Review.driver_id.is_(None))
         .order_by(Review.created_at.desc(), Review.id.desc())
         .offset(skip)
         .limit(limit)
@@ -50,7 +52,7 @@ def get_reviews_by_post(db: Session, post_id: int, skip: int = 0, limit: int = 5
 def get_reviews_by_user(db: Session, user_id: int, skip: int = 0, limit: int = 50) -> list[Review]:
     return (
         db.query(Review)
-        .filter(Review.user_id == user_id)
+        .filter(Review.user_id == user_id, Review.driver_id.is_(None))
         .order_by(Review.created_at.desc(), Review.id.desc())
         .offset(skip)
         .limit(limit)
@@ -61,10 +63,81 @@ def get_reviews_by_user(db: Session, user_id: int, skip: int = 0, limit: int = 5
 def has_user_review_for_post(db: Session, user_id: int, post_id: int) -> bool:
     return (
         db.query(Review)
-        .filter(Review.user_id == user_id, Review.post_id == post_id)
+        .filter(Review.user_id == user_id, Review.post_id == post_id, Review.driver_id.is_(None))
         .first()
         is not None
     )
+
+
+def create_driver_review(
+    db: Session,
+    user_id: int,
+    booking_id: int,
+    post_id: int,
+    driver_id: int,
+    rating: int,
+    content: str,
+) -> Review:
+    db_review = Review(
+        post_id=post_id,
+        user_id=user_id,
+        booking_id=booking_id,
+        driver_id=driver_id,
+        rating=rating,
+        content=content,
+        likes=0,
+    )
+    db.add(db_review)
+    db.commit()
+    db.refresh(db_review)
+    return db_review
+
+
+def has_user_review_for_driver_booking(db: Session, user_id: int, booking_id: int, driver_id: int) -> bool:
+    return (
+        db.query(Review)
+        .filter(
+            Review.user_id == user_id,
+            Review.booking_id == booking_id,
+            Review.driver_id == driver_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def get_driver_reviews(db: Session, driver_id: int, skip: int = 0, limit: int = 50) -> list[Review]:
+    return (
+        db.query(Review)
+        .filter(Review.driver_id == driver_id)
+        .order_by(Review.created_at.desc(), Review.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_driver_review_summary(db: Session, driver_id: int) -> dict:
+    total_reviews = (
+        db.query(func.count(Review.id))
+        .filter(Review.driver_id == driver_id)
+        .scalar()
+        or 0
+    )
+
+    avg_rating_value = (
+        db.query(func.avg(Review.rating))
+        .filter(Review.driver_id == driver_id)
+        .scalar()
+    )
+
+    average_rating = float(avg_rating_value) if avg_rating_value is not None else 0.0
+
+    return {
+        "driver_id": driver_id,
+        "total_reviews": int(total_reviews),
+        "average_rating": round(average_rating, 2),
+    }
 
 
 def update_review(db: Session, review: Review, payload: ReviewUpdate) -> Review:
@@ -96,7 +169,9 @@ def get_review_reminders_for_user(db: Session, user_id: int, skip: int = 0, limi
         .join(Post, Booking.post_id == Post.id)
         .outerjoin(
             Review,
-            (Review.post_id == Booking.post_id) & (Review.user_id == Booking.user_id),
+            (Review.post_id == Booking.post_id)
+            & (Review.user_id == Booking.user_id)
+            & (Review.driver_id.is_(None)),
         )
         .filter(
             Booking.user_id == user_id,

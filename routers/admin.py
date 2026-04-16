@@ -19,6 +19,7 @@ from crud.admin import (
     reject_driver_license,
 )
 from crud.kyc import get_admin_kyc_documents, update_kyc_status
+from crud.post import update_post_status
 from database_connection import get_db
 from models.driver_license import DriverLicense
 from models.kyc_document import KycDocument
@@ -32,6 +33,7 @@ from schemas.admin import (
 from schemas.user import UserOut
 from schemas.kyc import KycDocumentOut, KycStatusUpdateRequest, KycStatusUpdateResponse
 from schemas.contact import ContactMessageOut
+from schemas.post import PostOut, PostStatusUpdate
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -320,4 +322,18 @@ def change_kyc_status(
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KYC document not found")
 
+    return result
+
+
+@router.patch("/posts/{post_id}/status", response_model=PostOut, status_code=status.HTTP_200_OK)
+def update_vehicle_status(
+    post_id: int,
+    payload: PostStatusUpdate,
+    db: Session = Depends(get_db),
+    _current_admin=Depends(get_current_admin),
+):
+    """Update vehicle status (admin only)"""
+    result = update_post_status(db, post_id, payload.status)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
     return result

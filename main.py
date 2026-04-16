@@ -165,6 +165,13 @@ def _migrate_legacy_posts_schema() -> None:
             if category_meta and category_meta.get("nullable") is True:
                 conn.execute(text('ALTER TABLE posts ALTER COLUMN "category" SET NOT NULL'))
 
+        if "status" not in column_names:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text("ALTER TABLE posts ADD COLUMN status VARCHAR DEFAULT 'available'"))
+            else:
+                conn.execute(text("ALTER TABLE posts ADD COLUMN status VARCHAR DEFAULT 'available'"))
+            conn.execute(text("UPDATE posts SET status = 'available' WHERE status IS NULL"))
+
 
 def _migrate_legacy_kyc_schema() -> None:
     inspector = inspect(engine)
@@ -193,6 +200,41 @@ def _migrate_chat_schema() -> None:
             message_meta = columns.get("message")
             if message_meta and message_meta.get("nullable") is True:
                 conn.execute(text('ALTER TABLE hire_request_messages ALTER COLUMN "message" SET NOT NULL'))
+
+
+def _migrate_hire_requests_owner_mapping() -> None:
+    """Ensure hire_requests.owner_id stays aligned with posts.owner_id."""
+    inspector = inspect(engine)
+    if "hire_requests" not in inspector.get_table_names() or "posts" not in inspector.get_table_names():
+        return
+
+    hire_columns = {col["name"] for col in inspector.get_columns("hire_requests")}
+    if "post_id" not in hire_columns:
+        return
+
+    with engine.begin() as conn:
+        if "owner_id" not in hire_columns:
+            conn.execute(text("ALTER TABLE hire_requests ADD COLUMN owner_id INTEGER"))
+
+        if engine.dialect.name == "postgresql":
+            conn.execute(
+                text(
+                    "UPDATE hire_requests AS hr "
+                    "SET owner_id = p.owner_id "
+                    "FROM posts AS p "
+                    "WHERE hr.post_id = p.id "
+                    "AND (hr.owner_id IS NULL OR hr.owner_id <> p.owner_id)"
+                )
+            )
+        else:
+            conn.execute(
+                text(
+                    "UPDATE hire_requests "
+                    "SET owner_id = (SELECT owner_id FROM posts WHERE posts.id = hire_requests.post_id) "
+                    "WHERE EXISTS (SELECT 1 FROM posts WHERE posts.id = hire_requests.post_id) "
+                    "AND (owner_id IS NULL OR owner_id <> (SELECT owner_id FROM posts WHERE posts.id = hire_requests.post_id))"
+                )
+            )
 
 
 def _migrate_document_binary_storage_schema() -> None:
@@ -320,6 +362,66 @@ def _migrate_reviews_post_fk_cascade() -> None:
             )
         )
 
+
+def _migrate_reviews_driver_fields() -> None:
+    """Add driver-review columns to legacy reviews table."""
+    inspector = inspect(engine)
+    if "reviews" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("reviews")}
+
+    with engine.begin() as conn:
+        if "booking_id" not in columns:
+            conn.execute(text("ALTER TABLE reviews ADD COLUMN booking_id INTEGER"))
+
+        if "driver_id" not in columns:
+            conn.execute(text("ALTER TABLE reviews ADD COLUMN driver_id INTEGER"))
+
+    if engine.dialect.name != "postgresql":
+        return
+
+    refreshed_inspector = inspect(engine)
+    foreign_keys = refreshed_inspector.get_foreign_keys("reviews")
+    fk_by_column = {}
+    for foreign_key in foreign_keys:
+        constrained = foreign_key.get("constrained_columns") or []
+        if len(constrained) == 1:
+            fk_by_column[constrained[0]] = foreign_key
+
+    with engine.begin() as conn:
+        booking_fk = fk_by_column.get("booking_id")
+        booking_ondelete = ((booking_fk or {}).get("options") or {}).get("ondelete")
+        booking_name = (booking_fk or {}).get("name")
+        if booking_fk and isinstance(booking_ondelete, str) and booking_ondelete.upper() != "CASCADE" and booking_name:
+            conn.execute(text(f'ALTER TABLE reviews DROP CONSTRAINT IF EXISTS "{booking_name}"'))
+            booking_fk = None
+
+        if not booking_fk:
+            conn.execute(
+                text(
+                    "ALTER TABLE reviews "
+                    "ADD CONSTRAINT reviews_booking_id_fkey "
+                    "FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE"
+                )
+            )
+
+        driver_fk = fk_by_column.get("driver_id")
+        driver_ondelete = ((driver_fk or {}).get("options") or {}).get("ondelete")
+        driver_name = (driver_fk or {}).get("name")
+        if driver_fk and isinstance(driver_ondelete, str) and driver_ondelete.upper() != "CASCADE" and driver_name:
+            conn.execute(text(f'ALTER TABLE reviews DROP CONSTRAINT IF EXISTS "{driver_name}"'))
+            driver_fk = None
+
+        if not driver_fk:
+            conn.execute(
+                text(
+                    "ALTER TABLE reviews "
+                    "ADD CONSTRAINT reviews_driver_id_fkey "
+                    "FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE"
+                )
+            )
+
 # Create DB tables (for SQLite / development). 
 # In production, use Alembic migrations.
 Base.metadata.create_all(bind=engine)
@@ -328,9 +430,11 @@ _migrate_legacy_users_schema()
 _migrate_legacy_posts_schema()
 _migrate_legacy_kyc_schema()
 _migrate_chat_schema()
+_migrate_hire_requests_owner_mapping()
 _migrate_document_binary_storage_schema()
 _migrate_user_fk_actions()
 _migrate_reviews_post_fk_cascade()
+_migrate_reviews_driver_fields()
 
 app = FastAPI(
     title="Hamro Car Rental API",

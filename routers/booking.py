@@ -42,6 +42,10 @@ router = APIRouter(prefix="/bookings", tags=["Bookings"])
 def _to_booking_out(db: Session, booking) -> BookingOut:
     renter = get_user_by_id(db, booking.user_id)
     post = get_post_by_id(db, booking.post_id)
+    image_urls = getattr(post, "image_urls", None) if post else None
+    first_image_url = None
+    if isinstance(image_urls, list) and image_urls:
+        first_image_url = str(image_urls[0]).strip() or None
 
     return BookingOut(
         id=booking.id,
@@ -52,12 +56,17 @@ def _to_booking_out(db: Session, booking) -> BookingOut:
         return_location=booking.return_location,
         start_date=booking.start_date,
         end_date=booking.end_date,
+        total_days=booking.total_days,
+        price_per_day=booking.price_per_day,
+        total_price=booking.total_price,
         status=booking.status,
         note=booking.note,
         created_at=booking.created_at,
         user_name=getattr(renter, "full_name", None),
         user_email=getattr(renter, "email", None),
         vehicle_name=getattr(post, "post_title", None),
+        vehicle_image_url=first_image_url,
+        vehicle_location=getattr(post, "location", None),
     )
 
 
