@@ -3,7 +3,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator, validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 class UserRole(str, Enum):
     driver = "driver"
@@ -15,12 +15,13 @@ class UserBase(BaseModel):
     full_name: str
     role: UserRole = UserRole.user
 
-    @validator("full_name")
-    def validate_full_name(cls, v):
-        v = v.strip()
-        if len(v) < 2:
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
             raise ValueError("Full name must be at least 2 characters long")
-        return v
+        return value
 
 class UserCreate(UserBase):
     password: str
